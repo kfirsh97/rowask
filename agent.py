@@ -30,6 +30,7 @@ load_dotenv()
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 MAX_STEPS = 8
+REQUEST_TIMEOUT_MS = 90_000      # give up on a single model call after 90 seconds
 LOG_DIR = Path(__file__).parent / "logs"
 
 SYSTEM_PROMPT = """You are a careful data analyst for a Porsche car-sales business.
@@ -80,7 +81,8 @@ FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest"]   # used only if t
 
 def _is_temporary(e: Exception) -> bool:
     msg = str(e)
-    return any(t in msg for t in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "overloaded"))
+    return any(t in msg for t in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "overloaded",
+                                  "timed out", "Timeout", "timeout"))
 
 
 def _generate(client, model, contents, config, retries=3):
@@ -106,14 +108,25 @@ def _summary(result: dict) -> str:
     return f"{result['row_count']} rows{more}"
 
 
+def make_client():
+    """Gemini client with a hard timeout per request, and the SDK's own hidden retries turned off
+    (our _generate does the retrying, so every wait is visible on screen)."""
+    key = os.environ["GEMINI_API_KEY"].strip().strip("'\"").strip()
+    return genai.Client(api_key=key, http_options=types.HttpOptions(
+        timeout=REQUEST_TIMEOUT_MS,
+        retry_options=types.HttpRetryOptions(attempts=1),
+    ))
+
+
 def ask(question: str, client=None, verbose=True) -> dict:
     """Run the agent loop for one question. Returns the answer, the last SQL and every step."""
-    client = client or genai.Client(api_key=os.environ["GEMINI_API_KEY"].strip().strip("'\"").strip())
+    client = client or make_client()
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         tools=[TOOLS],
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),  # we run the loop ourselves
         # temperature left at the model default: newer Gemini models are tuned for it
+        thinking_config=types.ThinkingConfig(thinking_level=os.environ.get("THINKING_LEVEL", "LOW")),
     )
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=question)])]
     steps, last_sql, answer = [], None, None
@@ -134,6 +147,8 @@ def ask(question: str, client=None, verbose=True) -> dict:
                         raise
                     print(f"   ({candidate} unavailable - switching to {FALLBACK_MODELS[i]})")
         else:
+            if verbose:
+                print(f"  ... thinking ({model})", flush=True)
             response = _generate(client, model, contents, config)
         calls = response.function_calls or []
 
@@ -173,7 +188,7 @@ def ask(question: str, client=None, verbose=True) -> dict:
 
 
 def list_models():
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"].strip().strip("'\"").strip())
+    client = make_client()
     for m in client.models.list():
         actions = getattr(m, "supported_actions", None) or []
         if not actions or "generateContent" in actions:
