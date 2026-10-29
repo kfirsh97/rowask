@@ -63,3 +63,23 @@ def test_stops_after_max_steps(monkeypatch, tmp_path):
 
 def test_unknown_tool_is_reported_not_crashed():
     assert "error" in agent.call_tool("format_disk", {})
+
+
+def test_switches_model_when_main_is_overloaded(monkeypatch, tmp_path):
+    """503 'high demand' on the main model: retry, then switch to a fallback before step 1."""
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(agent.time, "sleep", lambda s: None)
+    used = []
+
+    class Busy:
+        def generate_content(self, model, contents, config):
+            used.append(model)
+            if model == agent.MODEL:
+                raise RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+            content = agent.types.Content(role="model", parts=[agent.types.Part.from_text(text="ok")])
+            return SimpleNamespace(function_calls=None, text="answer", candidates=[SimpleNamespace(content=content)])
+
+    r = agent.ask("q", client=SimpleNamespace(models=Busy()), verbose=False)
+    assert r["answer"] == "answer"
+    assert r["model"] == agent.FALLBACK_MODELS[0]
+    assert used.count(agent.MODEL) == 4          # 1 try + 3 retries before switching

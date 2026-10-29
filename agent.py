@@ -75,15 +75,23 @@ def call_tool(name: str, args: dict) -> dict:
     return {"error": f"Unknown tool: {name}"}
 
 
-def _generate(client, contents, config, retries=3):
-    """Call the model, waiting and retrying if the free tier's rate limit is hit."""
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest"]   # used only if the main model is overloaded
+
+
+def _is_temporary(e: Exception) -> bool:
+    msg = str(e)
+    return any(t in msg for t in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "overloaded"))
+
+
+def _generate(client, model, contents, config, retries=3):
+    """Call the model, waiting and retrying on temporary errors (rate limit or high demand)."""
     for attempt in range(retries + 1):
         try:
-            return client.models.generate_content(model=MODEL, contents=contents, config=config)
+            return client.models.generate_content(model=model, contents=contents, config=config)
         except Exception as e:
-            if ("429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)) and attempt < retries:
-                wait = 20 * (attempt + 1)
-                print(f"   (rate limit - waiting {wait}s)")
+            if _is_temporary(e) and attempt < retries:
+                wait = 10 * (attempt + 1)
+                print(f"   ({model} is busy - retrying in {wait}s)")
                 time.sleep(wait)
                 continue
             raise
@@ -111,8 +119,22 @@ def ask(question: str, client=None, verbose=True) -> dict:
     steps, last_sql, answer = [], None, None
     started = time.time()
 
+    model = MODEL
     for step in range(1, MAX_STEPS + 1):
-        response = _generate(client, contents, config)
+        if step == 1:
+            # If the main model is overloaded, switch before the conversation starts.
+            # (We never switch mid-conversation: a model may not accept another model's turns.)
+            for i, candidate in enumerate([MODEL] + FALLBACK_MODELS):
+                try:
+                    response = _generate(client, candidate, contents, config)
+                    model = candidate
+                    break
+                except Exception as e:
+                    if not _is_temporary(e) or i == len(FALLBACK_MODELS):
+                        raise
+                    print(f"   ({candidate} unavailable - switching to {FALLBACK_MODELS[i]})")
+        else:
+            response = _generate(client, model, contents, config)
         calls = response.function_calls or []
 
         if not calls:                          # no tool call means the model is done
@@ -137,7 +159,7 @@ def ask(question: str, client=None, verbose=True) -> dict:
 
     record = {
         "time": datetime.now().isoformat(timespec="seconds"),
-        "model": MODEL,
+        "model": model,
         "question": question,
         "answer": answer,
         "final_sql": last_sql,
@@ -168,7 +190,7 @@ def main():
             break
         print(f"\n[{MODEL}] {q}")
         r = ask(q)
-        print(f"\n{r['answer']}\n\n({len(r['steps'])} tool calls, {r['seconds']}s)")
+        print(f"\n{r['answer']}\n\n({r['model']}, {len(r['steps'])} tool calls, {r['seconds']}s)")
         if questions is not None and not questions:
             break
 
