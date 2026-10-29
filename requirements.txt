@@ -1,4 +1,5 @@
 pymssql==2.4.6
 google-genai==2.34.0
+anthropic==2.3.0
 python-dotenv==1.2.4
 pytest==8.4.1

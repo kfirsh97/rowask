@@ -12,6 +12,8 @@ Run:
   python agent.py "Who was the best seller in 2022?"
   python agent.py            (interactive mode)
   python agent.py --models   (list the Gemini models your key can use)
+
+Provider: set PROVIDER=gemini (default) or PROVIDER=claude in .env.
 """
 import json
 import os
@@ -119,8 +121,8 @@ def make_client():
     ))
 
 
-def ask(question: str, client=None, verbose=True) -> dict:
-    """Run the agent loop for one question. Returns the answer, the last SQL and every step."""
+def _run_gemini(question, client, verbose):
+    """Agent loop on Gemini. Returns (answer, steps, last_sql, model_used)."""
     client = client or make_client()
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
@@ -131,7 +133,6 @@ def ask(question: str, client=None, verbose=True) -> dict:
     )
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=question)])]
     steps, last_sql, answer = [], None, None
-    started = time.time()
 
     model = MODEL
     for step in range(1, MAX_STEPS + 1):
@@ -176,6 +177,65 @@ def ask(question: str, client=None, verbose=True) -> dict:
     else:
         answer = f"Stopped after {MAX_STEPS} steps without a final answer."
 
+    return answer, steps, last_sql, model
+
+
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5-5")
+
+CLAUDE_TOOLS = [
+    {"name": d.name, "description": d.description, "input_schema": d.parameters_json_schema}
+    for d in TOOLS.function_declarations
+]
+
+
+def _run_claude(question, client, verbose):
+    """The same agent loop on Claude. Returns (answer, steps, last_sql, model_used).
+    Same tools, same prompt, same safety - only the API format differs."""
+    if client is None:
+        import anthropic
+        key = os.environ["ANTHROPIC_API_KEY"].strip().strip("'\"").strip()
+        client = anthropic.Anthropic(api_key=key, timeout=REQUEST_TIMEOUT_MS / 1000, max_retries=3)
+    messages = [{"role": "user", "content": question}]
+    steps, last_sql, answer = [], None, None
+    for step in range(1, MAX_STEPS + 1):
+        if verbose:
+            print(f"  ... thinking ({CLAUDE_MODEL})", flush=True)
+        response = client.messages.create(
+            model=CLAUDE_MODEL, max_tokens=2048, system=SYSTEM_PROMPT,
+            tools=CLAUDE_TOOLS, messages=messages,
+        )
+        calls = [b for b in response.content if b.type == "tool_use"]
+        if not calls:
+            answer = "".join(b.text for b in response.content if b.type == "text")
+            break
+        messages.append({"role": "assistant", "content": response.content})
+        results = []
+        for call in calls:
+            args = dict(call.input or {})
+            result = call_tool(call.name, args)
+            if call.name == "run_query" and "error" not in result:
+                last_sql = args.get("sql")
+            steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result)})
+            if verbose:
+                shown = args.get("sql", "").replace("\n", " ")[:110]
+                print(f"  step {step}: {call.name} {shown}\n           -> {_summary(result)}")
+            results.append({"type": "tool_result", "tool_use_id": call.id,
+                            "content": json.dumps(result, ensure_ascii=False),
+                            "is_error": "error" in result})
+        messages.append({"role": "user", "content": results})
+    else:
+        answer = f"Stopped after {MAX_STEPS} steps without a final answer."
+    return answer, steps, last_sql, CLAUDE_MODEL
+
+
+def ask(question: str, client=None, verbose=True, provider=None) -> dict:
+    """Run the agent for one question on the chosen provider ("gemini" or "claude", from .env PROVIDER).
+    Returns the answer, the last SQL and every step, and writes them to the log."""
+    provider = (provider or os.environ.get("PROVIDER", "gemini")).lower()
+    started = time.time()
+    run = _run_claude if provider == "claude" else _run_gemini
+    answer, steps, last_sql, model = run(question, client, verbose)
+
     record = {
         "time": datetime.now().isoformat(timespec="seconds"),
         "model": model,
@@ -207,7 +267,8 @@ def main():
         q = questions.pop() if questions else input("\nQuestion (empty to quit): ").strip()
         if not q:
             break
-        print(f"\n[{MODEL}] {q}")
+        provider = os.environ.get("PROVIDER", "gemini").lower()
+        print(f"\n[{CLAUDE_MODEL if provider == 'claude' else MODEL}] {q}")
         r = ask(q)
         print(f"\n{r['answer']}\n\n({r['model']}, {len(r['steps'])} tool calls, {r['seconds']}s)")
         if questions is not None and not questions:
@@ -223,6 +284,11 @@ if __name__ == "__main__":
         if "404" in str(e) and "model" in str(e).lower():
             sys.exit(f"Model '{MODEL}' is not available to your key. Run: python agent.py --models, "
                      "then set GEMINI_MODEL=<a flash model from the list> in .env")
+        if "credit balance" in str(e).lower():
+            sys.exit("Anthropic: your API credit balance is empty. API usage is billed separately from a "
+                     "Claude.ai subscription - add credits at https://console.anthropic.com (Billing).")
+        if "authentication_error" in str(e) or "invalid x-api-key" in str(e).lower():
+            sys.exit("Anthropic rejected the API key. Check ANTHROPIC_API_KEY in .env (no quotes).")
         if "API_KEY_INVALID" in str(e) or "API key not valid" in str(e):
             sys.exit("Gemini rejected the API key. Create a new one at https://aistudio.google.com/apikey, "
                      "put it in .env as GEMINI_API_KEY=... (no quotes), then run: python check_setup.py")

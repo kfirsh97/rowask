@@ -83,3 +83,32 @@ def test_switches_model_when_main_is_overloaded(monkeypatch, tmp_path):
     assert r["answer"] == "answer"
     assert r["model"] == agent.FALLBACK_MODELS[0]
     assert used.count(agent.MODEL) == 2          # 1 try + 1 quick retry before switching
+
+
+def test_claude_loop_fixes_error_and_answers(monkeypatch, tmp_path):
+    """Same loop on Claude's API format: tool_use blocks in, tool_result blocks out."""
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    results = iter([{"error": "Invalid column name 'Year'."},
+                    {"columns": ["n"], "rows": [{"n": 1}], "row_count": 1, "truncated": False}])
+    monkeypatch.setattr(agent, "run_query", lambda sql: next(results))
+    sent = []
+
+    def block(**kw):
+        return SimpleNamespace(**kw)
+
+    script = [
+        [block(type="tool_use", id="a", name="run_query", input={"sql": "SELECT Year FROM Sales"})],
+        [block(type="tool_use", id="b", name="run_query", input={"sql": "SELECT YEAR(Sale_Date) FROM Sales"})],
+        [block(type="text", text="Done.")],
+    ]
+
+    class Messages:
+        def create(self, **kw):
+            sent.append(kw["messages"][-1])
+            return SimpleNamespace(content=script.pop(0))
+
+    r = agent.ask("q", client=SimpleNamespace(messages=Messages()), verbose=False, provider="claude")
+    assert r["answer"] == "Done."
+    assert r["final_sql"] == "SELECT YEAR(Sale_Date) FROM Sales"
+    assert sent[1]["content"][0]["is_error"] is True          # the error went back to the model
+    assert r["model"] == agent.CLAUDE_MODEL
