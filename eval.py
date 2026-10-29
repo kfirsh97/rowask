@@ -71,6 +71,10 @@ def main():
                     print("     provider overloaded - retrying this question in 60s")
                     time.sleep(60)
                     continue
+                if not _is_temporary(e) and not any(x.get("model") for x in results):
+                    # Nothing has worked yet and this is not a passing overload: it is a setup problem
+                    # (missing package, bad key, no credit). Stop now instead of failing all 12 questions.
+                    raise SystemExit(f"\nSetup problem, stopping the run: {e}\nRun: python check_setup.py")
                 kind = "ERROR" if _is_temporary(e) else "FAIL"
                 rec.update(correct=None if kind == "ERROR" else False,
                            reason=f"{'provider overloaded' if kind == 'ERROR' else 'agent crashed'}: {str(e)[:160]}")
