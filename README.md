@@ -49,10 +49,16 @@ python eval.py --notes off     # schema only
 python eval.py --notes on      # schema + business notes (currency, units, value formats)
 ```
 
-| Setup | Score | Avg tool calls | Avg time |
+Results (Claude Sonnet 5.5, October 2026):
+
+| Setup | Score | Avg tool calls | Avg time per question |
 |---|---|---|---|
-| Schema only | _run eval.py_ | | |
-| Schema + business notes | _run eval.py_ | | |
+| Schema only | 11 / 12 | 3.6 | 14.0 s |
+| Schema + business notes | **12 / 12** | **3.0** | **10.0 s** |
+
+With the business notes (currency, units, value formats, how to compute a car's age) the agent answered every
+question correctly, with fewer queries and faster. A fair caveat: this is one run of 12 questions, so the
+difference between the two rows is a signal, not proof — repeated runs and more questions would tighten it.
 
 Results with full details are saved in `eval_results/`.
 
@@ -66,7 +72,7 @@ cp .env.example .env           # add your API key and the DB password
 # create the read-only user: run setup/01_create_reader.sql as sa
 python check_setup.py          # DB connection, read-only check, API key check
 python agent.py "Who were the top 3 sellers by revenue?"
-python -m pytest tests         # 36 tests, no database or API key needed
+python -m pytest tests         # 37 tests, no database or API key needed
 ```
 
 ## Files
