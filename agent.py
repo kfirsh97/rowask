@@ -174,4 +174,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        if "API_KEY_INVALID" in str(e) or "API key not valid" in str(e):
+            sys.exit("Gemini rejected the API key. Create a new one at https://aistudio.google.com/apikey, "
+                     "put it in .env as GEMINI_API_KEY=... (no quotes), then run: python check_setup.py")
+        raise

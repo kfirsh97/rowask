@@ -36,8 +36,19 @@ def main():
 
     conn.close()
 
-    # 3. API key present (we never print the key itself).
-    print("Gemini API key:", "found" if os.environ.get("GEMINI_API_KEY") else "MISSING - add it to .env")
+    # 3. API key: present, not the placeholder, and accepted by Google (we never print the key itself).
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key or key == "your-key-here":
+        print("Gemini API key: MISSING - put your real key in .env")
+        return
+    if key != os.environ.get("GEMINI_API_KEY") or key[:1] in "'\"" or not key.startswith("AIza"):
+        print("Gemini API key: looks malformed - no quotes or spaces, and Gemini keys start with 'AIza'")
+    try:
+        from google import genai
+        next(iter(genai.Client(api_key=key).models.list()))
+        print("Gemini API key: valid (Google accepted it)")
+    except Exception as e:
+        print("Gemini API key: REJECTED by Google -", str(e)[:120])
 
 
 if __name__ == "__main__":
