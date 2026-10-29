@@ -2,7 +2,7 @@
 # 2023-2026, one row per product in an order.
 # Build the database from the CSV first:   python setup/csv_to_sqlite.py data/superstore.csv
 
-title = "Superstore Sales Agent"
+title = "Superstore Sales"
 description = """Chat with the Superstore sales data in Hebrew or English: orders, customers, products, regions,
 discounts and profit. The agent writes the SQL, checks its own result,
 and shows the query behind every answer."""

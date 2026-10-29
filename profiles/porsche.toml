@@ -2,7 +2,7 @@
 # It runs on SQL Server (set DB_USER / DB_PASSWORD in .env, see SETUP.md) or, with no setup at all,
 # on the SQLite copy in data/porsche.sqlite.
 
-title = "Porsche SQL Agent"
+title = "Porsche Sales"
 description = """Chat with the Porsche sales database in Hebrew or English. Ask a business question, then keep
 going with follow-ups like "and in 2023?". The agent writes the SQL, checks its own result,
 and shows the query behind every answer."""

@@ -18,7 +18,7 @@ PROFILE_DIR = Path(__file__).parent / "profiles"
 
 DEFAULTS = {
     "name": "generic",
-    "title": "SQL Agent",
+    "title": "Your database",
     "description": "Chat with the database in Hebrew or English. The agent writes the SQL, checks its own "
                    "result, and shows the query behind every answer.",
     "business": "a business",

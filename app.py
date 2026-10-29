@@ -64,7 +64,8 @@ except Exception as e:                                        # bad DB_PROFILE: 
     PROFILE, PROFILE_ERROR = load_profile("generic"), str(e)
 EXAMPLES = PROFILE["examples"]
 
-st.set_page_config(page_title=PROFILE["title"], page_icon="🏁", layout="centered")
+BRAND = "RowAsk"
+st.set_page_config(page_title=f"{BRAND} · {PROFILE['title']}", page_icon="🏁", layout="centered")
 
 # ------------------------------------------------------------------ look
 # Palette taken from period Porsche paint: Chalk (ground), Slate Grey (ink), Oak Green Metallic (accent),
@@ -91,6 +92,8 @@ st.html("""
   font-family: var(--display); font-weight: 400; font-size: clamp(1.45rem, 3.4vw, 2.1rem);
   letter-spacing: .02em; color: var(--slate); margin: 0; padding: 0; line-height: 1.15;
 }
+.brand .wordmark { font-family: var(--display); font-size: .8rem; letter-spacing: .28em; text-transform: uppercase;
+  color: var(--oak); margin-bottom: -.1rem; }
 .brand .redline { width: 7.5rem; height: 4px; background: linear-gradient(90deg, var(--slate) 0 70%, var(--signal) 70% 100%); }
 .brand p { color: var(--steel); font-size: 1.02rem; margin: .25rem 0 0; max-width: 40rem; line-height: 1.5; }
 
@@ -124,6 +127,7 @@ st.html("""
 
 st.html(f"""
 <div class="brand">
+<div class="wordmark">{BRAND}</div>
 <h1>{esc(PROFILE["title"])}</h1>
 <div class="redline" aria-hidden="true"></div>
 <p>{esc(PROFILE["description"])}</p>

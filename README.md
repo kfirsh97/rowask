@@ -1,8 +1,9 @@
-# SQL Agent 🤖 – ask the Porsche database in plain language
+# RowAsk 🤖 – ask your database in plain language
 
-An AI agent that answers business questions about the [Porsche sales database](../README.md) — in Hebrew or English.
-It reads the schema, writes T-SQL, runs it, checks its own result, fixes its own errors, and answers with the query it used,
-so every answer can be verified.
+**RowAsk** is an AI agent that answers business questions about a database — in Hebrew or English. It was built on
+the [Porsche sales database](../README.md) and works on any other one (or on your own CSV and Excel files).
+It reads the schema, writes the SQL, runs it, checks its own result, fixes its own errors, and answers with the query
+it used, so every answer can be verified.
 
 ```
 $ python agent.py "כמה מכירות היו בכל שנה?"

@@ -2,7 +2,7 @@
 # invoices). Included to show the agent works on a database it was never built for.
 # Source and MIT license: https://github.com/lerocha/chinook-database (see data/README.md).
 
-title = "Music Store SQL Agent"
+title = "Music Store"
 description = """Chat with the Chinook music-store database in Hebrew or English: artists, albums, tracks,
 customers and their purchases. The agent writes the SQL, checks its own result,
 and shows the query behind every answer."""
