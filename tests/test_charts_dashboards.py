@@ -32,7 +32,7 @@ def test_form_follows_the_data(cols, rows, expected):
 def test_model_spec_is_kept_only_if_it_names_real_columns():
     assert charts.check_spec({"type": "line", "x": "Year", "y": "Profit"}, ["Year", "Profit"])["type"] == "line"
     assert charts.check_spec({"type": "line", "x": "Year", "y": "Revenue"}, ["Year", "Profit"]) is None
-    assert charts.check_spec({"type": "pie", "x": "a", "y": "b"}, ["a", "b"]) is None
+    assert charts.check_spec({"type": "radar", "x": "a", "y": "b"}, ["a", "b"]) is None
 
 
 def test_chart_block_is_taken_out_of_the_answer():
@@ -145,3 +145,47 @@ def test_drill_across_a_join(monkeypatch):
          "JOIN Sales s ON c.ID_NUMBER = s.ID_NUMBER GROUP BY z.State ORDER BY Revenue DESC")
     sql, child = drill.rewrite(q, "State", "California")
     assert child == "City" and tools.run_query_all(sql)[1][0][0] == "San Francisco"
+
+
+# ------------------------------------------------------------------ pies, maps, heatmaps, the type switcher
+def test_places_are_found_on_the_right_map():
+    assert charts.geo_match(["California", "Texas", "New York"])[0] == "us"
+    kind, found = charts.geo_match(["CA", "TX", "NY", "Ontario"])           # codes count, 3 of 4 is enough
+    assert kind == "us" and found["CA"] == "California"
+    assert charts.geo_match(["USA", "France", "Germany"])[0] == "world"      # aliases for country names
+    assert charts.geo_match(["Consumer", "Corporate", "Home Office"]) is None
+    assert charts.geo_match(["Texas", "Utah"]) is None                       # too few places for a map
+
+
+def test_switcher_offers_only_honest_forms():
+    share = (["Segment", "Sales"], [("Consumer", 5), ("Corporate", 3), ("Home Office", 2)])
+    assert charts.compatible({"type": "bar", "x": "Segment", "y": "Sales"}, *share) == ["bar", "pie"]
+    loss = (["Segment", "Profit"], [("A", 5), ("B", -3), ("C", 2)])
+    assert "pie" not in charts.compatible({"type": "bar", "x": "Segment", "y": "Profit"}, *loss)
+    states = (["State", "Sales"], [("California", 5), ("Texas", 3), ("New York", 4)])
+    assert charts.compatible({"type": "map", "x": "State", "y": "Sales"}, *states)[0] == "map"
+    cross = (["Region", "Category", "Sales"], [("W", "A", 1), ("W", "B", 2), ("E", "A", 3), ("E", "B", 4)])
+    assert set(charts.compatible({"type": "grouped_bar", "x": "Region", "y": "Sales", "color": "Category"}, *cross)) == \
+        {"grouped_bar", "stacked_bar", "stacked_100", "heatmap"}
+
+
+def test_pie_folds_small_slices_and_refuses_negatives():
+    rows = [(f"S{i}", 10 - i) for i in range(9)]
+    chart = charts.build({"type": "pie", "x": "S", "y": "V"}, ["S", "V"], rows)
+    names = {v for layer in chart.to_dict()["datasets"].values() for r in layer for v in [r.get("S")] if v}
+    assert len(names) == charts.MAX_SLICES and "Other" in names
+    chart = charts.build({"type": "pie", "x": "S", "y": "V"}, ["S", "V"], [("a", 3), ("b", -1), ("c", 2)])
+    assert "arc" not in json.dumps(chart.to_dict())         # drawn as bars instead
+
+
+@pytest.mark.parametrize("spec, rows, mark", [
+    ({"type": "map", "x": "State", "y": "Sales"}, [("California", 5), ("Texas", 3), ("New York", 4)], "geoshape"),
+    ({"type": "heatmap", "x": "Region", "y": "Sales", "color": "Category"},
+     [("W", "A", 1), ("W", "B", 2), ("E", "A", 3), ("E", "B", 4)], "rect"),
+    ({"type": "stacked_100", "x": "Region", "y": "Sales", "color": "Category"},
+     [("W", "A", 1), ("W", "B", 2), ("E", "A", 3), ("E", "B", 4)], "normalize"),
+])
+def test_new_forms_draw(spec, rows, mark):
+    cols = [spec["x"], spec["color"], spec["y"]] if spec.get("color") else [spec["x"], spec["y"]]
+    chart = charts.build(spec, cols, rows, drillable=True)
+    assert chart is not None and mark in json.dumps(chart.to_dict())

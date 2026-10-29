@@ -261,7 +261,7 @@ def draw(spec, columns, rows, height=300) -> bool:
     return True
 
 
-DRILLABLE = {"bar", "grouped_bar", "stacked_bar"}
+DRILLABLE = {"bar", "grouped_bar", "stacked_bar", "stacked_100", "pie", "map"}
 
 
 def drill_level(key, spec, columns, rows, sql):
@@ -297,12 +297,25 @@ def drill_back(key, depth):
     st.session_state.drill[key] = st.session_state.drill.get(key, [])[:depth]
 
 
-def chart_view(key, spec, columns, rows, sql, height=300, tabs=True):
-    """Chart (+ table twin) with drill-down: a click on a bar zooms into the next level inside it.
-    Returns False when the result has no chart (the caller shows the table)."""
+def chart_view(key, spec, columns, rows, sql, height=300, tabs=True, on_type=None):
+    """Chart (+ table twin) with a chart-type switcher and drill-down (a click on a bar, slice or state zooms
+    into the next level inside it). Returns the spec drawn, or None when the result has no chart."""
     spec, columns, rows, sql, path = drill_level(key, spec, columns, rows, sql)
     if not spec:
-        return False
+        return None
+    options = charts.compatible(spec, columns, rows)
+    chosen = st.session_state.setdefault("ctype", {})
+    current = chosen.get(key, spec["type"])
+    if current not in options:
+        current = options[0] if options else spec["type"]
+    if len(options) > 1:
+        picked = st.segmented_control("Chart type", options, default=current, key=f"ct{key}-{len(path)}",
+                                      format_func=lambda t: charts.LABELS.get(t, t), label_visibility="collapsed")
+        if picked and picked != current:
+            chosen[key] = current = picked
+            if on_type:
+                on_type({**spec, "type": picked})
+    spec = {**spec, "type": current}
     if path:                                                   # where we are: All › West › California
         names = [f"All {path[0]['x'].replace('_', ' ')}"] + [str(step["value"]) for step in path]
         widths = [len(n) + 6 for n in names]                    # each crumb as wide as its text
@@ -329,10 +342,12 @@ def chart_view(key, spec, columns, rows, sql, height=300, tabs=True):
         if spec.get("type") == "bar" and len(rows) > charts.MAX_BARS:
             notes.append(f"Showing the top {charts.MAX_BARS} of {len(rows):,} - all of them are in the Table tab.")
         if level:
-            notes.append(f"Click a bar to see its {level[2].replace('_', ' ')}.")
+            what = {"pie": "a slice", "map": "a place", "stacked_100": "a bar"}.get(spec["type"], "a bar")
+            notes.append(f"Click {what} to see its {level[2].replace('_', ' ')}.")
         if notes:
             st.caption(" ".join(notes))
-            picked = (event.selection or {}).get(charts.DRILL) if event else None
+        if level:                                              # a click on a drillable chart: zoom in
+            picked = (event.selection or {}).get(charts.DRILL)
             if picked:
                 value = picked[0].get(spec["x"]) if isinstance(picked, list) else None
                 if value is not None:
@@ -341,13 +356,13 @@ def chart_view(key, spec, columns, rows, sql, height=300, tabs=True):
 
     if not tabs:
         chart()
-        return True
+        return spec
     as_chart, as_table = st.tabs(["Chart", "Table"])           # every chart has its table twin
     with as_chart:
         chart()
     with as_table:
         table(columns, rows)
-    return True
+    return spec
 
 
 def show_result(run, question=None, key=None):
@@ -357,7 +372,10 @@ def show_result(run, question=None, key=None):
     spec = None
     if run.get("rows"):
         spec = charts.check_spec(run.get("chart"), run["columns"]) or charts.auto_spec(run["columns"], run["rows"])
-        if not chart_view(f"a{key}", spec, run["columns"], run["rows"], run.get("final_sql")):
+        shown = chart_view(f"a{key}", spec, run["columns"], run["rows"], run.get("final_sql"))
+        if shown:
+            spec = shown                                            # pin what is on screen, chart type included
+        else:
             table(run["columns"], run["rows"])
     if run.get("final_sql"):
         with st.expander("SQL behind this answer"):
@@ -366,7 +384,7 @@ def show_result(run, question=None, key=None):
         pinned = any(i["sql"] == run["final_sql"].strip() for i in dash_items())
         st.button("On the dashboard" if pinned else "Add to dashboard", key=f"pin{key}", disabled=pinned,
                   icon=":material/check:" if pinned else ":material/dashboard_customize:",
-                  on_click=pin, args=(question, run["final_sql"], run.get("chart") or spec))
+                  on_click=pin, args=(question, run["final_sql"], spec or run.get("chart")))
     steps = len(run["steps"])
     st.html(f'<div class="meta">{run["model"]}, {steps} step{"s" if steps != 1 else ""}, '
             f'{run["seconds"]:.1f} s</div>')
@@ -450,6 +468,12 @@ def pin(question, sql, chart):
     st.toast("Added to the dashboard", icon=":material/dashboard_customize:")
 
 
+def set_chart(item, spec):
+    """The chart type chosen on a dashboard card is saved with it (and used in the HTML export)."""
+    item["chart"] = spec
+    dash_save()
+
+
 def unpin(item_id):
     items = dash_items()
     items[:] = [i for i in items if i["id"] != item_id]
@@ -516,7 +540,7 @@ def render_dashboard():
             if res["error"]:
                 st.error(f"This query no longer runs: {res['error']}")
             elif not chart_view(f"d{item['id']}", res["spec"], res["columns"], res["rows"], item["sql"],
-                                height=260, tabs=False):
+                                height=260, tabs=False, on_type=lambda new, it=item: set_chart(it, new)):
                 table(res["columns"], res["rows"])
             with st.expander("Table and SQL"):
                 if not res["error"]:

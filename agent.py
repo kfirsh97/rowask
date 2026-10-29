@@ -68,10 +68,14 @@ Charts:
 - When the user asks for a chart, graph, plot, dashboard item or anything visual ("גרף", "תרשים", "ויזואלי") -
   or the answer is a trend over time or a comparison across several groups - add a ```chart block after the
   SQL block, naming columns of your final query:
-  {{"type": "bar" | "line" | "area" | "stacked_bar" | "grouped_bar" | "scatter" | "stat",
+  {{"type": "bar" | "line" | "area" | "stacked_bar" | "grouped_bar" | "stacked_100" | "scatter" | "stat" |
+            "pie" | "map" | "heatmap",
    "x": "<column>", "y": "<one numeric column>", "color": "<column that splits the series, or null>"}}
   line/area for change over time, bar for comparing groups, grouped/stacked bar for two groupings,
-  stat for a single number. One measure only - never two measures with different scales on one chart.
+  stat for a single number. pie only for parts of a whole (6 parts or fewer, no negative values);
+  map for a measure by US state or by country (x = the state or country column); heatmap for a measure across
+  two groupings (x and color); stacked_100 for each group's share. One measure only - never two measures
+  with different scales on one chart.
 - The app draws the chart from the real result of that query, so never put numbers in the chart block.
   Make the query return exactly the rows the chart needs, sorted sensibly (time ascending, or largest first)."""
 

@@ -125,6 +125,18 @@ its query, so it can never show a number the database didn't return. Ask for one
 The form follows the data's job, there is only ever one y-axis, and the colors are a fixed, validated order
 (color-blind checks run with the data-viz skill's validator); every chart has its table twin.
 
+**Chart types.** Bar, line, area, grouped, stacked and 100% stacked bars, scatter, stat tiles, and:
+- **Pie (donut)** – part of a whole, with the total in the middle. At most 6 slices (the rest fold into "Other"),
+  never offered when a value is negative.
+- **Map** – US states (names or codes like `CA`) or world countries, one hue from light to dark; places with no
+  value stay gray. Offered only when most of the values are found on the map. Shapes: `geo/` (us-atlas and
+  world-atlas, ISC license).
+- **Heatmap** – two groupings and a measure (region × category, year × segment), darker = more.
+
+Above every chart, a switcher shows only the forms that result can honestly take (a share can be a bar or a pie, a
+list of states a map or a bar, region × category a grouped, stacked, 100% or heatmap chart). On a dashboard the
+choice is saved with the card. Clicking a slice or a state drills down like a bar.
+
 **Drill-down.** Click a bar to zoom into it: Region → its states → their cities, Category → sub-categories →
 products. No model call: the answer's own SQL is rewritten (the clicked column swapped for the next level, a filter on
 the clicked value added - joins, other filters and the measure untouched), so the drilled bars add up to the bar
