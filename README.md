@@ -84,3 +84,14 @@ python -m pytest tests         # 37 tests, no database or API key needed
 | `eval.py` · `eval_questions.py` · `compare.py` | Answer key, evaluation runner and result comparison |
 | `db.py` · `check_setup.py` · `setup/` | Database connection, setup check, read-only user |
 | `tests/` | Safety, agent loop (with a fake model), comparison and evaluation tests |
+
+## Web interface
+
+```bash
+streamlit run app.py           # opens http://localhost:8501
+DEMO=1 streamlit run app.py    # replays two recorded runs - no database or API key needed
+```
+
+Ask in Hebrew or English and watch each step as it happens: the schema read, every query with its row count,
+then the answer, the result table and the SQL behind it. The sidebar switches between Claude and Gemini and
+turns the business notes on or off.

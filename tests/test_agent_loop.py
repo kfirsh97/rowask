@@ -131,3 +131,12 @@ def test_final_sql_is_the_query_shown_in_the_answer(monkeypatch, tmp_path):
     ])
     r = agent.ask("q", client=client, verbose=False)
     assert r["final_sql"] == "SELECT YEAR(d), COUNT(*) FROM Sales GROUP BY YEAR(d)"
+
+
+def test_on_step_reports_each_step_live(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(agent, "get_schema", lambda: "TABLES")
+    seen = []
+    client = fake_client([([("get_schema", {})], None), ([], "done")])
+    agent.ask("q", client=client, verbose=False, on_step=seen.append)
+    assert [s["tool"] for s in seen] == ["get_schema"]

@@ -123,7 +123,7 @@ def make_client():
     ))
 
 
-def _run_gemini(question, client, verbose):
+def _run_gemini(question, client, verbose, on_step=None):
     """Agent loop on Gemini. Returns (answer, steps, last_sql, model_used)."""
     client = client or make_client()
     config = types.GenerateContentConfig(
@@ -177,6 +177,8 @@ def _run_gemini(question, client, verbose):
             if call.name == "run_query" and "error" not in result:
                 last_sql = args.get("sql")
             steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result)})
+            if on_step:
+                on_step(steps[-1])          # lets a UI show each step live
             if verbose:
                 shown = args.get("sql", "").replace("\n", " ")[:110]
                 print(f"  step {step}: {call.name} {shown}\n           -> {_summary(result)}")
@@ -196,7 +198,7 @@ CLAUDE_TOOLS = [
 ]
 
 
-def _run_claude(question, client, verbose):
+def _run_claude(question, client, verbose, on_step=None):
     """The same agent loop on Claude. Returns (answer, steps, last_sql, model_used).
     Same tools, same prompt, same safety - only the API format differs."""
     if client is None:
@@ -224,6 +226,8 @@ def _run_claude(question, client, verbose):
             if call.name == "run_query" and "error" not in result:
                 last_sql = args.get("sql")
             steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result)})
+            if on_step:
+                on_step(steps[-1])          # lets a UI show each step live
             if verbose:
                 shown = args.get("sql", "").replace("\n", " ")[:110]
                 print(f"  step {step}: {call.name} {shown}\n           -> {_summary(result)}")
@@ -236,13 +240,13 @@ def _run_claude(question, client, verbose):
     return answer, steps, last_sql, CLAUDE_MODEL
 
 
-def ask(question: str, client=None, verbose=True, provider=None) -> dict:
+def ask(question: str, client=None, verbose=True, provider=None, on_step=None) -> dict:
     """Run the agent for one question on the chosen provider ("gemini" or "claude", from .env PROVIDER).
     Returns the answer, the last SQL and every step, and writes them to the log."""
     provider = (provider or os.environ.get("PROVIDER", "gemini")).lower()
     started = time.time()
     run = _run_claude if provider == "claude" else _run_gemini
-    answer, steps, last_sql, model = run(question, client, verbose)
+    answer, steps, last_sql, model = run(question, client, verbose, on_step)
     # The query that actually produced the answer is the one the model shows in its ```sql block.
     # The last successful query can be a side check (e.g. "are there NULL dates?"), so prefer the block.
     shown = re.findall(r"```sql\s*(.*?)```", answer or "", flags=re.S | re.I)
