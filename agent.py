@@ -10,7 +10,7 @@ Every step is written to logs/ so you can see exactly what the agent did and why
 
 Run:
   python agent.py "Who was the best seller in 2022?"
-  python agent.py            (interactive mode)
+  python agent.py            (interactive chat - follow-up questions see the earlier turns)
   python agent.py --models   (list the Gemini models your key can use)
 
 Provider: set PROVIDER=gemini (default) or PROVIDER=claude in .env.
@@ -48,9 +48,21 @@ How to work:
 - Only state numbers that came from a query result. Never invent data.
 - If the question cannot be answered from this database, say so plainly.
 
+Conversation:
+- This is a chat. Earlier messages are the conversation so far - use them to understand
+  follow-ups like "and in 2023?", "only Turbo models" or "why is that?", and build on the
+  earlier query instead of starting from scratch.
+- Not every message needs a query. Greetings, thanks, "what data do you have?" or "explain
+  that query" can be answered directly (call get_schema if you need to see what the database holds).
+- If a question is genuinely ambiguous, ask one short clarifying question instead of guessing.
+- Stay on this database and data analysis; politely decline unrelated requests.
+
 Final answer:
 - Answer in the same language as the question, short and clear, with the key numbers.
-- After the answer, show the final SQL query you used, in a ```sql code block."""
+- If you ran a query for this message, show the final SQL query you used after the answer,
+  in a ```sql code block. Do not add a SQL block for a query you did not run in this turn."""
+
+HISTORY_TURNS = 6   # how many earlier question/answer pairs the model sees (keeps requests small)
 
 TOOLS = types.Tool(function_declarations=[
     types.FunctionDeclaration(
@@ -113,6 +125,14 @@ def _summary(result: dict) -> str:
     return f"{result['row_count']} rows{more}"
 
 
+def _history_pairs(history):
+    """The last HISTORY_TURNS finished turns as (question, answer) text pairs.
+    Only the text goes back to the model - not the earlier tool calls - which keeps every
+    request small and lets either provider continue a conversation the other one started."""
+    pairs = [(h.get("question"), h.get("answer")) for h in (history or [])]
+    return [(q, a) for q, a in pairs if q and a][-HISTORY_TURNS:]
+
+
 def make_client():
     """Gemini client with a hard timeout per request, and the SDK's own hidden retries turned off
     (our _generate does the retrying, so every wait is visible on screen)."""
@@ -123,7 +143,7 @@ def make_client():
     ))
 
 
-def _run_gemini(question, client, verbose, on_step=None):
+def _run_gemini(question, client, verbose, on_step=None, history=None):
     """Agent loop on Gemini. Returns (answer, steps, last_sql, model_used)."""
     client = client or make_client()
     config = types.GenerateContentConfig(
@@ -133,7 +153,11 @@ def _run_gemini(question, client, verbose, on_step=None):
         # temperature left at the model default: newer Gemini models are tuned for it
         thinking_config=types.ThinkingConfig(thinking_level=os.environ.get("THINKING_LEVEL", "LOW")),
     )
-    contents = [types.Content(role="user", parts=[types.Part.from_text(text=question)])]
+    contents = []
+    for q, a in _history_pairs(history):
+        contents.append(types.Content(role="user", parts=[types.Part.from_text(text=q)]))
+        contents.append(types.Content(role="model", parts=[types.Part.from_text(text=a)]))
+    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=question)]))
     steps, last_sql, answer = [], None, None
 
     model = MODEL
@@ -198,14 +222,17 @@ CLAUDE_TOOLS = [
 ]
 
 
-def _run_claude(question, client, verbose, on_step=None):
+def _run_claude(question, client, verbose, on_step=None, history=None):
     """The same agent loop on Claude. Returns (answer, steps, last_sql, model_used).
     Same tools, same prompt, same safety - only the API format differs."""
     if client is None:
         import anthropic
         key = os.environ["ANTHROPIC_API_KEY"].strip().strip("'\"").strip()
         client = anthropic.Anthropic(api_key=key, timeout=REQUEST_TIMEOUT_MS / 1000, max_retries=3)
-    messages = [{"role": "user", "content": question}]
+    messages = []
+    for q, a in _history_pairs(history):
+        messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+    messages.append({"role": "user", "content": question})
     steps, last_sql, answer = [], None, None
     for step in range(1, MAX_STEPS + 1):
         if verbose:
@@ -240,13 +267,14 @@ def _run_claude(question, client, verbose, on_step=None):
     return answer, steps, last_sql, CLAUDE_MODEL
 
 
-def ask(question: str, client=None, verbose=True, provider=None, on_step=None) -> dict:
+def ask(question: str, client=None, verbose=True, provider=None, on_step=None, history=None) -> dict:
     """Run the agent for one question on the chosen provider ("gemini" or "claude", from .env PROVIDER).
+    history: earlier turns of the same chat, as [{"question": ..., "answer": ...}], oldest first.
     Returns the answer, the last SQL and every step, and writes them to the log."""
     provider = (provider or os.environ.get("PROVIDER", "gemini")).lower()
     started = time.time()
     run = _run_claude if provider == "claude" else _run_gemini
-    answer, steps, last_sql, model = run(question, client, verbose, on_step)
+    answer, steps, last_sql, model = run(question, client, verbose, on_step, history)
     # The query that actually produced the answer is the one the model shows in its ```sql block.
     # The last successful query can be a side check (e.g. "are there NULL dates?"), so prefer the block.
     shown = re.findall(r"```sql\s*(.*?)```", answer or "", flags=re.S | re.I)
@@ -256,6 +284,7 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None) -
         "time": datetime.now().isoformat(timespec="seconds"),
         "model": model,
         "question": question,
+        "history_turns": len(_history_pairs(history)),
         "answer": answer,
         "final_sql": final_sql,
         "steps": steps,
@@ -279,13 +308,15 @@ def main():
     if "--models" in sys.argv:
         return list_models()
     questions = [" ".join(sys.argv[1:])] if len(sys.argv) > 1 else None
+    history = []                       # interactive mode is a conversation: follow-ups see earlier turns
     while True:
         q = questions.pop() if questions else input("\nQuestion (empty to quit): ").strip()
         if not q:
             break
         provider = os.environ.get("PROVIDER", "gemini").lower()
         print(f"\n[{CLAUDE_MODEL if provider == 'claude' else MODEL}] {q}")
-        r = ask(q)
+        r = ask(q, history=history)
+        history.append(r)
         print(f"\n{r['answer']}\n\n({r['model']}, {len(r['steps'])} tool calls, {r['seconds']}s)")
         if questions is not None and not questions:
             break

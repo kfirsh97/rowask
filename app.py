@@ -83,8 +83,9 @@ st.html("""
 <div class="brand">
 <h1>Porsche SQL Agent</h1>
 <div class="redline" aria-hidden="true"></div>
-<p>Ask the Porsche sales database a business question in Hebrew or English.
-The agent writes the SQL, checks its own result, and shows the query behind every answer.</p>
+<p>Chat with the Porsche sales database in Hebrew or English. Ask a business question, then keep
+going with follow-ups like "and in 2023?". The agent writes the SQL, checks its own result,
+and shows the query behind every answer.</p>
 </div>
 """)
 
@@ -116,6 +117,14 @@ with st.sidebar:
     st.markdown("#### Safety")
     st.caption("Read-only database user. Only single SELECT queries reach the database. "
                "At most 8 steps per question.")
+    st.markdown("#### Conversation")
+    turns = len(st.session_state.get("history", []))
+    st.caption(f"The agent sees the last {min(turns, 6)} of {turns} earlier turns, so follow-up questions work."
+               if turns else "Follow-up questions see the earlier turns of this chat.")
+    if st.button("New conversation", icon=":material/add_comment:", disabled=not turns):
+        st.session_state.history = []
+        st.session_state.chat_id = st.session_state.get("chat_id", 0) + 1   # fresh example picker too
+        st.rerun()
     st.markdown("[Source code on GitHub](https://github.com/kfirsh97/porsche-sales-database/tree/main/agent)")
 
 
@@ -170,7 +179,7 @@ def show_result(run):
             f'{run["seconds"]:.1f} s</div>')
 
 
-def run_demo(question, status, live):
+def run_demo(question, status, live, history=None):
     from demo_runs import DEMO_RUNS
     rec = DEMO_RUNS.get(question)
     if rec is None:
@@ -182,7 +191,7 @@ def run_demo(question, status, live):
     return rec
 
 
-def run_live(question, status, live):
+def run_live(question, status, live, history):
     os.environ["SCHEMA_NOTES"] = "on" if notes else "off"
     import agent
     from tools import run_query_all
@@ -192,7 +201,7 @@ def run_live(question, status, live):
         steps.append(step)
         live.html(trace_html(steps))
 
-    r = agent.ask(question, verbose=False, provider=provider, on_step=on_step)
+    r = agent.ask(question, verbose=False, provider=provider, on_step=on_step, history=history)
     rec = {**r, "columns": [], "rows": []}
     if r.get("final_sql"):
         try:
@@ -214,12 +223,17 @@ for item in st.session_state.history:
     with st.chat_message("user", avatar=":material/person:"):
         md(item["question"])
     with st.chat_message("assistant", avatar=":material/database:"):
-        with st.expander(f"How the agent got there ({len(item['run']['steps'])} steps)"):
-            st.html(trace_html(item["run"]["steps"]))
+        if item["run"]["steps"]:          # a plain chat reply has no steps to show
+            n_steps = len(item["run"]["steps"])
+            with st.expander(f"How the agent got there ({n_steps} step{'s' if n_steps != 1 else ''})"):
+                st.html(trace_html(item["run"]["steps"]))
         show_result(item["run"])
 
-picked = st.pills("Try a question", EXAMPLES, key=f"pick{len(st.session_state.history)}")
-typed = st.chat_input("Ask about sales, sellers, cars or insurance, in Hebrew or English")
+picked = None
+if not st.session_state.history:          # examples only start a chat; after that, the user just keeps talking
+    picked = st.pills("Try a question", EXAMPLES, key=f"pick{st.session_state.get('chat_id', 0)}")
+typed = st.chat_input("Ask a follow-up, or a new question" if st.session_state.history
+                      else "Ask about sales, sellers, cars or insurance, in Hebrew or English")
 question = typed or picked
 
 if question:
@@ -229,7 +243,9 @@ if question:
         with st.status("Working on it", expanded=True) as status:
             live = st.empty()
             try:
-                run = (run_demo if DEMO else run_live)(question, status, live)
+                earlier = [{"question": h["question"], "answer": h["run"]["answer"]}
+                           for h in st.session_state.history]
+                run = (run_demo if DEMO else run_live)(question, status, live, earlier)
             except Exception as e:
                 run = None
                 msg = str(e)
@@ -240,7 +256,9 @@ if question:
                 status.update(label=f"Stopped: {msg[:160]}", state="error")
             if run:
                 n = len(run["steps"])
-                status.update(label=f"Answered in {n} step{'s' if n != 1 else ''}", state="complete", expanded=False)
+                label = f"Answered in {n} step{'s' if n != 1 else ''}" if n else "Answered"
+                status.update(label=label, state="complete", expanded=False)
         if run:
             show_result(run)
             st.session_state.history.append({"question": question, "run": run})
+            st.rerun()          # redraw from history: sidebar turn count updates, examples give way to the chat

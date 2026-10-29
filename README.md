@@ -21,6 +21,10 @@ A hand-written agent loop (~100 lines, no agent framework), so every decision is
 2. Each turn the model either calls a tool or answers. SQL errors are sent back to it, so it corrects itself.
 3. The loop stops at an answer, or after **8 steps** — it can never loop forever.
 4. Every step is logged to `logs/` (question, each tool call, result, final SQL, time).
+5. **It's a conversation.** The last 6 question/answer pairs go back to the model with each new message, so
+   follow-ups work ("how many sales in 2022?" → "and in 2023?" → "only Turbo models"). Only the text of earlier
+   turns is resent, not their tool calls, which keeps requests small. Messages that need no data
+   ("thanks", "explain that query") get a direct reply without touching the database.
 
 **Two model providers**, same tools, prompt and safety: Gemini (`PROVIDER=gemini`) or Claude (`PROVIDER=claude`).
 
@@ -92,6 +96,7 @@ streamlit run app.py           # opens http://localhost:8501
 DEMO=1 streamlit run app.py    # replays two recorded runs - no database or API key needed
 ```
 
-Ask in Hebrew or English and watch each step as it happens: the schema read, every query with its row count,
+A chat: ask in Hebrew or English, then keep going with follow-up questions – the agent remembers the
+conversation, and **New conversation** in the sidebar starts over. Watch each step as it happens: the schema read, every query with its row count,
 then the answer, the result table and the SQL behind it. The sidebar switches between Claude and Gemini and
 turns the business notes on or off.

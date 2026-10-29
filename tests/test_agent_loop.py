@@ -140,3 +140,71 @@ def test_on_step_reports_each_step_live(monkeypatch, tmp_path):
     client = fake_client([([("get_schema", {})], None), ([], "done")])
     agent.ask("q", client=client, verbose=False, on_step=seen.append)
     assert [s["tool"] for s in seen] == ["get_schema"]
+
+
+# ------------------------------------------------------------------ conversation (chat memory)
+HISTORY = [
+    {"question": "How many sales were there in 2022?", "answer": "There were 1,512 sales.\n```sql\nSELECT COUNT(*) FROM Sales WHERE YEAR(Sold_Date) = 2022\n```"},
+    {"question": "ומה לגבי 2023?", "answer": "ב-2023 היו 1,487 מכירות."},
+]
+
+
+def _texts(contents):
+    return [(c.role, c.parts[0].text) for c in contents]
+
+
+def test_gemini_sees_earlier_turns_before_the_new_question(monkeypatch, tmp_path):
+    """A follow-up like 'and in 2024?' only makes sense with the earlier turns in front of the model."""
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    client = fake_client([([], "ב-2024 היו 1,555 מכירות.")])
+    r = agent.ask("ו-2024?", client=client, verbose=False, history=HISTORY)
+
+    sent = _texts(client.models.seen[0])
+    assert sent == [("user", HISTORY[0]["question"]), ("model", HISTORY[0]["answer"]),
+                    ("user", HISTORY[1]["question"]), ("model", HISTORY[1]["answer"]),
+                    ("user", "ו-2024?")]
+    assert r["history_turns"] == 2
+
+
+def test_claude_sees_earlier_turns_before_the_new_question(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    sent = []
+
+    class Messages:
+        def create(self, **kw):
+            sent.append(list(kw["messages"]))
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")])
+
+    agent.ask("and 2024?", client=SimpleNamespace(messages=Messages()), verbose=False,
+              provider="claude", history=HISTORY)
+    assert [m["role"] for m in sent[0]] == ["user", "assistant", "user", "assistant", "user"]
+    assert sent[0][1]["content"] == HISTORY[0]["answer"]
+    assert sent[0][-1]["content"] == "and 2024?"
+
+
+def test_history_is_capped_and_skips_unfinished_turns():
+    long = [{"question": f"q{i}", "answer": f"a{i}"} for i in range(10)]
+    long.insert(3, {"question": "crashed before answering", "answer": None})
+    pairs = agent._history_pairs(long)
+    assert len(pairs) == agent.HISTORY_TURNS
+    assert pairs[-1] == ("q9", "a9")                     # the newest turns are the ones kept
+    assert all(a for _, a in pairs)
+    assert agent._history_pairs(None) == []
+
+
+def test_no_history_means_a_single_fresh_question(monkeypatch, tmp_path):
+    """The eval runner and the CLI one-shot call ask() without history - nothing changes for them."""
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    client = fake_client([([], "done")])
+    r = agent.ask("q", client=client, verbose=False)
+    assert _texts(client.models.seen[0]) == [("user", "q")]
+    assert r["history_turns"] == 0
+
+
+def test_plain_chat_reply_runs_no_query(monkeypatch, tmp_path):
+    """'Thanks!' gets a reply without touching the database, and no SQL is shown under it."""
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(agent, "run_query", lambda sql: (_ for _ in ()).throw(AssertionError("no query expected")))
+    client = fake_client([([], "בשמחה! יש עוד משהו שתרצה לבדוק?")])
+    r = agent.ask("תודה!", client=client, verbose=False, history=HISTORY)
+    assert r["steps"] == [] and r["final_sql"] is None
