@@ -34,3 +34,21 @@ def test_scores_pass_and_fail(monkeypatch, tmp_path):
     saved = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
     assert saved["score"] == "1/2"
     assert [r["correct"] for r in saved["results"]] == [True, False]
+
+
+def test_overload_is_error_not_wrong_answer(monkeypatch, tmp_path):
+    """A question that fails only because the provider is overloaded is not counted as wrong."""
+    monkeypatch.setattr(tools, "run_query_all", lambda sql: (["n"], [(1,)]))
+    monkeypatch.setattr(evaluation.time, "sleep", lambda s: None)
+
+    def overloaded(question, verbose=False, provider=None):
+        raise RuntimeError("503 UNAVAILABLE high demand")
+
+    monkeypatch.setattr(agent, "ask", overloaded)
+    monkeypatch.setattr(evaluation, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["eval.py", "--ids", "8", "--pause", "0"])
+    evaluation.main()
+    saved = json.loads(next(tmp_path.glob("*.json")).read_text(encoding="utf-8"))
+    assert saved["provider_errors"] == 1
+    assert saved["score"] == "0/0"
+    assert saved["results"][0]["correct"] is None

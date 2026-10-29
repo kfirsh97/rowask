@@ -97,7 +97,7 @@ def _generate(client, model, contents, config, retries=3):
             return client.models.generate_content(model=model, contents=contents, config=config)
         except Exception as e:
             if _is_temporary(e) and attempt < retries:
-                wait = 10 * (attempt + 1)
+                wait = min(10 * (attempt + 1), 45)
                 print(f"   ({model} is busy - retrying in {wait}s)")
                 time.sleep(wait)
                 continue
@@ -161,7 +161,8 @@ def _run_gemini(question, client, verbose):
         else:
             if verbose:
                 print(f"  ... thinking ({model})", flush=True)
-            response = _generate(client, model, contents, config)
+            # mid-conversation we cannot switch models, so be more patient here
+            response = _generate(client, model, contents, config, retries=5)
         calls = response.function_calls or []
 
         if not calls:                          # no tool call means the model is done
