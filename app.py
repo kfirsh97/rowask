@@ -19,6 +19,7 @@ import streamlit as st
 import charts
 import dashboards
 import db
+import drill
 import dbprofile
 import upload as uploads
 from dbprofile import load_profile
@@ -260,6 +261,95 @@ def draw(spec, columns, rows, height=300) -> bool:
     return True
 
 
+DRILLABLE = {"bar", "grouped_bar", "stacked_bar"}
+
+
+def drill_level(key, spec, columns, rows, sql):
+    """The level of a drill-down this chart is at: (spec, columns, rows, sql, path). path = [(column, value), ...]."""
+    path = st.session_state.setdefault("drill", {}).get(key, [])
+    if not path:
+        return spec, columns, rows, sql, []
+    level = path[-1]
+    try:
+        cols, rws = tools_mod().run_query_all(level["sql"], max_rows=500)
+    except Exception as e:
+        st.error(f"Could not drill down: {e}")
+        st.session_state.drill[key] = []
+        return spec, columns, rows, sql, []
+    child_spec = {**spec, "x": level["child"]}
+    spec2 = charts.check_spec(child_spec, cols) or charts.auto_spec(cols, rws)
+    return spec2, cols, rws, level["sql"], path
+
+
+def tools_mod():
+    import tools
+    return tools
+
+
+def drill_into(key, sql, x, value):
+    out = drill.rewrite(sql, x, value)
+    if out:
+        new_sql, child = out
+        st.session_state.drill.setdefault(key, []).append({"x": x, "value": value, "child": child, "sql": new_sql})
+
+
+def drill_back(key, depth):
+    st.session_state.drill[key] = st.session_state.drill.get(key, [])[:depth]
+
+
+def chart_view(key, spec, columns, rows, sql, height=300, tabs=True):
+    """Chart (+ table twin) with drill-down: a click on a bar zooms into the next level inside it.
+    Returns False when the result has no chart (the caller shows the table)."""
+    spec, columns, rows, sql, path = drill_level(key, spec, columns, rows, sql)
+    if not spec:
+        return False
+    if path:                                                   # where we are: All › West › California
+        names = [f"All {path[0]['x'].replace('_', ' ')}"] + [str(step["value"]) for step in path]
+        widths = [len(n) + 6 for n in names]                    # each crumb as wide as its text
+        crumbs = st.columns(widths + [max(4, 90 - sum(widths))], gap="small")
+        crumbs[0].button(names[0], key=f"crumb{key}-0", icon=":material/arrow_upward:",
+                         on_click=drill_back, args=(key, 0))
+        for i, step in enumerate(path, 1):
+            crumbs[i].button(str(step["value"]), key=f"crumb{key}-{i}", disabled=i == len(path),
+                             on_click=drill_back, args=(key, i))
+    level = drill.next_level(sql, spec["x"]) if spec.get("type") in DRILLABLE and sql else None
+
+    def chart():
+        out = charts.build(spec, columns, rows, height=height, drillable=bool(level))
+        if out is None:
+            st.caption("No chart for this result.")
+            return
+        if isinstance(out, tuple):
+            st.html(charts.stat_html(out[1], out[2]))
+            return
+        event = st.altair_chart(charts.style(out), width="stretch", theme=None, key=f"chart{key}-{len(path)}",
+                                on_select="rerun" if level else "ignore",
+                                selection_mode=charts.DRILL if level else None)
+        notes = []
+        if spec.get("type") == "bar" and len(rows) > charts.MAX_BARS:
+            notes.append(f"Showing the top {charts.MAX_BARS} of {len(rows):,} - all of them are in the Table tab.")
+        if level:
+            notes.append(f"Click a bar to see its {level[2].replace('_', ' ')}.")
+        if notes:
+            st.caption(" ".join(notes))
+            picked = (event.selection or {}).get(charts.DRILL) if event else None
+            if picked:
+                value = picked[0].get(spec["x"]) if isinstance(picked, list) else None
+                if value is not None:
+                    drill_into(key, sql, spec["x"], value)
+                    st.rerun()
+
+    if not tabs:
+        chart()
+        return True
+    as_chart, as_table = st.tabs(["Chart", "Table"])           # every chart has its table twin
+    with as_chart:
+        chart()
+    with as_table:
+        table(columns, rows)
+    return True
+
+
 def show_result(run, question=None, key=None):
     import re
     text = re.sub(r"```sql.*?```", "", run["answer"] or "", flags=re.S | re.I).strip()   # SQL has its own expander
@@ -267,14 +357,7 @@ def show_result(run, question=None, key=None):
     spec = None
     if run.get("rows"):
         spec = charts.check_spec(run.get("chart"), run["columns"]) or charts.auto_spec(run["columns"], run["rows"])
-        if spec:
-            as_chart, as_table = st.tabs(["Chart", "Table"])      # every chart has its table twin
-            with as_chart:
-                if not draw(spec, run["columns"], run["rows"]):
-                    st.caption("No chart for this result.")
-            with as_table:
-                table(run["columns"], run["rows"])
-        else:
+        if not chart_view(f"a{key}", spec, run["columns"], run["rows"], run.get("final_sql")):
             table(run["columns"], run["rows"])
     if run.get("final_sql"):
         with st.expander("SQL behind this answer"):
@@ -432,7 +515,8 @@ def render_dashboard():
             st.html(f'<div class="dash-title">{esc(item["title"])}</div>')
             if res["error"]:
                 st.error(f"This query no longer runs: {res['error']}")
-            elif not draw(res["spec"], res["columns"], res["rows"], height=260):
+            elif not chart_view(f"d{item['id']}", res["spec"], res["columns"], res["rows"], item["sql"],
+                                height=260, tabs=False):
                 table(res["columns"], res["rows"])
             with st.expander("Table and SQL"):
                 if not res["error"]:

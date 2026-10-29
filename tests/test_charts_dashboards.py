@@ -88,3 +88,60 @@ def test_exported_page_is_standalone_and_escapes_titles(porsche_sqlite):
     assert 'class="stat-value">4,554<' in html and "vega-lite@6.4.1" in html
     specs = json.loads(html.split("const SPECS = ")[1].split(";\n")[0])
     assert len(specs) == 1 and next(iter(specs.values()))["data"]
+
+
+# ------------------------------------------------------------------ drill-down
+import drill  # noqa: E402
+import tools  # noqa: E402
+
+
+@pytest.fixture
+def superstore(monkeypatch):
+    monkeypatch.setenv("DB_PROFILE", "superstore")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///data/superstore.sqlite")
+    monkeypatch.delenv("DB_USER", raising=False)
+    dbprofile.load_profile.cache_clear()
+    db._engine_for.cache_clear()
+    drill._children.cache_clear()
+    if not (Path(__file__).resolve().parents[1] / "data" / "superstore.sqlite").exists():
+        pytest.skip("build data/superstore.sqlite first (setup/csv_to_sqlite.py) - the data is not in the repo")
+    yield
+    dbprofile.load_profile.cache_clear()
+    db._engine_for.cache_clear()
+
+
+def test_hierarchy_is_found_in_the_data(superstore):
+    """States nest in regions and cities in states; a cross-cutting dimension (Segment) is never a next level."""
+    q = "SELECT {x}, SUM(Sales) AS Sales FROM superstore GROUP BY {x}"
+    assert drill.next_level(q.format(x="Region"), "Region")[2] == "State_Province"
+    assert drill.next_level(q.format(x="State_Province"), "State_Province")[2] == "City"
+    assert drill.next_level(q.format(x="Category"), "Category")[2] == "Sub_Category"
+    assert drill.next_level(q.format(x="City"), "City") is None            # the bottom
+    assert drill.next_level("SELECT COUNT(*) AS n FROM superstore", "n") is None
+
+
+def test_drilled_numbers_add_up_to_the_clicked_bar(superstore):
+    q = "SELECT Region, SUM(Sales) AS Sales FROM superstore WHERE Segment = 'Consumer' GROUP BY 1 ORDER BY 2 DESC"
+    sql, child = drill.rewrite(q, "Region", "West")
+    assert child == "State_Province" and "Segment = 'Consumer'" in sql   # the original filter is kept
+    _, states = tools.run_query_all(sql)
+    _, west = tools.run_query_all("SELECT SUM(Sales) FROM superstore WHERE Segment = 'Consumer' AND Region = 'West'")
+    assert abs(sum(r[1] for r in states) - west[0][0]) < 0.01
+    sql2, child2 = drill.rewrite(sql, "State_Province", "California")
+    assert child2 == "City" and tools.run_query_all(sql2)[1][0][0] == "Los Angeles"
+
+
+def test_clicked_value_is_quoted_not_injected(superstore):
+    sql, _ = drill.rewrite("SELECT Region, COUNT(*) AS n FROM superstore GROUP BY Region", "Region", "x' OR '1'='1")
+    assert tools.run_query_all(sql)[1] == []                               # treated as a value, matches nothing
+
+
+def test_drill_across_a_join(monkeypatch):
+    for k in ("DATABASE_URL", "DB_USER", "DB_PROFILE"):
+        monkeypatch.delenv(k, raising=False)
+    dbprofile.load_profile.cache_clear()
+    db._engine_for.cache_clear()
+    q = ("SELECT z.State, SUM(s.Sold_Price) AS Revenue FROM Customers c JOIN ZipCodes z ON c.ZipCodeID = z.ZipCodeID "
+         "JOIN Sales s ON c.ID_NUMBER = s.ID_NUMBER GROUP BY z.State ORDER BY Revenue DESC")
+    sql, child = drill.rewrite(q, "State", "California")
+    assert child == "City" and tools.run_query_all(sql)[1][0][0] == "San Francisco"

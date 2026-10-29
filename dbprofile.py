@@ -26,6 +26,8 @@ DEFAULTS = {
     "examples": [],
     "database_url": "",
     "answer_key": False,       # True only where eval_questions.py has the answer key for this database
+    "drill": [],               # optional drill-down levels, e.g. [["Region", "State_Province", "City"]] -
+                               # without it, the levels are found in the data (drill.py)
 }
 
 

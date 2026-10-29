@@ -156,6 +156,14 @@ def _y_format(series):
     return "~s" if m >= 10_000 else ",.4~f"
 
 
+def _label_expr(field, fmt):
+    """Text for a value label: 458K / 1.2M / 2,763 - three significant figures, never 457.688k."""
+    v = f"datum['{field}']"
+    if fmt == "~s":
+        return f"replace(replace(format({v}, '.3~s'), 'k', 'K'), 'G', 'B')"
+    return f"format({v}, ',.4~f')"
+
+
 def _axis(fmt, **kw):
     """Axis ticks: clean compact numbers - 0 / 20K / 1.5M (d3's ~s would say 0k, 20k, 1.5G for billions)."""
     if fmt == "~s":
@@ -171,8 +179,12 @@ def _x_encoding(df, x, horizontal=False):
     return alt.X(f"{x}:N", title=x)
 
 
-def build(spec, columns, rows, height=300):
-    """An Altair chart for this spec and result, or a ('stat', label, value) tuple for one number."""
+DRILL = "drill"        # name of the click selection on a drillable bar chart
+
+
+def build(spec, columns, rows, height=300, drillable=False):
+    """An Altair chart for this spec and result, or a ('stat', label, value) tuple for one number.
+    drillable: bars carry a click selection on their category (read by the page to zoom into it)."""
     df = frame(columns, rows)
     kind, x, y, color = spec["type"], spec.get("x"), spec.get("y"), spec.get("color")
     if kind == "stat":
@@ -190,18 +202,23 @@ def build(spec, columns, rows, height=300):
     if kind in ("bar", "grouped_bar", "stacked_bar"):
         if kind == "bar" and len(df) > MAX_BARS:
             df = df.nlargest(MAX_BARS, y)
+        pick = alt.selection_point(name=DRILL, fields=[x], on="click", clear=False) if drillable else None
+        hand = {"cursor": "pointer"} if drillable else {}
         cats = df[x].astype(str)
         horizontal = kind == "bar" and (df[x].nunique() > 6 or cats.str.len().max() > 14) \
             and not _is_time(df, x)
         n = df[x].nunique()
         base = alt.Chart(df)
         if horizontal:
-            bar = base.mark_bar(cornerRadiusEnd=4, size=min(24, max(8, 260 // max(n, 1)))).encode(
+            bar = base.mark_bar(cornerRadiusEnd=4, size=min(24, max(8, 260 // max(n, 1))), **hand).encode(
                 y=alt.Y(f"{x}:N", sort="-x", title=None),
                 x=alt.X(f"{y}:Q", title=y, axis=_axis(yfmt)),
                 color=color_enc, tooltip=tip)
-            label = base.mark_text(align="left", dx=4, color=INK_2, fontSize=11).encode(
-                y=alt.Y(f"{x}:N", sort="-x"), x=f"{y}:Q", text=alt.Text(f"{y}:Q", format=yfmt))
+            if pick is not None:
+                bar = bar.add_params(pick)
+            label = base.transform_calculate(_label=_label_expr(y, yfmt)).mark_text(
+                align="left", dx=4, color=INK_2, fontSize=11).encode(
+                y=alt.Y(f"{x}:N", sort="-x"), x=f"{y}:Q", text="_label:N")
             height = max(height, 26 * n + 40)
             return (bar + label if n <= 15 else bar).properties(height=height)
         xenc = _x_encoding(df, x)
@@ -217,10 +234,12 @@ def build(spec, columns, rows, height=300):
         if kind == "stacked_bar" and color:
             enc["y"] = alt.Y(f"sum({y}):Q", title=y, axis=_axis(yfmt))
         bars_per_band = len(domain) if kind == "grouped_bar" and color else 1
-        bar = alt.Chart(df).mark_bar(size=min(24, max(6, 300 // max(n * bars_per_band, 1))), **mark).encode(**enc)
+        bar = alt.Chart(df).mark_bar(size=min(24, max(6, 300 // max(n * bars_per_band, 1))), **mark, **hand).encode(**enc)
+        if pick is not None:
+            bar = bar.add_params(pick)
         if kind == "bar" and n <= 12:
-            label = alt.Chart(df).mark_text(dy=-8, color=INK_2, fontSize=11).encode(
-                x=xenc, y=f"{y}:Q", text=alt.Text(f"{y}:Q", format=yfmt))
+            label = alt.Chart(df).transform_calculate(_label=_label_expr(y, yfmt)).mark_text(
+                dy=-8, color=INK_2, fontSize=11).encode(x=xenc, y=f"{y}:Q", text="_label:N")
             return (bar + label).properties(height=height)
         return bar.properties(height=height)
 

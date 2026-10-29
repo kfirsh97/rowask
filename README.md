@@ -87,7 +87,7 @@ pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
 python check_setup.py          # DB connection, read-only check, API key check
 python -m streamlit run app.py # web chat on http://localhost:8501
-python -m pytest tests         # 95 tests (3 need a PostgreSQL server), no API key needed
+python -m pytest tests         # 99 tests (3 need a PostgreSQL server), no API key needed
 ```
 
 ## Files
@@ -102,6 +102,7 @@ python -m pytest tests         # 95 tests (3 need a PostgreSQL server), no API k
 | `dbprofile.py` · `profiles/` | Per-database knowledge: business line, notes, example questions |
 | `upload.py` | Uploads on the web page: reading CSV/Excel, cleaning, building the session's database, describing it |
 | `sqlimport.py` | SQL scripts from any dialect into SQLite: splitting, translating, IDENTITY values, foreign keys, the guard |
+| `drill.py` | Drill-down: finds the next level in the data and rewrites the query for the clicked bar |
 | `charts.py` · `dashboards.py` | Charts drawn from query rows (form, palette, marks); pinned dashboards and the HTML export |
 | `data/` | SQLite copies: Porsche (built by `setup/build_sqlite.py`) and the Chinook sample database |
 | `check_setup.py` · `setup/` · `SETUP.md` | Setup check, read-only user, SQLite builder, CSV importer, setup guide |
@@ -123,6 +124,13 @@ model only suggests the encoding (bar, line, grouped bar, stat tile...), and the
 its query, so it can never show a number the database didn't return. Ask for one in words too ("show it as a graph").
 The form follows the data's job, there is only ever one y-axis, and the colors are a fixed, validated order
 (color-blind checks run with the data-viz skill's validator); every chart has its table twin.
+
+**Drill-down.** Click a bar to zoom into it: Region → its states → their cities, Category → sub-categories →
+products. No model call: the answer's own SQL is rewritten (the clicked column swapped for the next level, a filter on
+the clicked value added - joins, other filters and the measure untouched), so the drilled bars add up to the bar
+that was clicked. The levels are found in the data: a column is the next level when its values nest inside the
+clicked one (100% of states sit in one region, 89% of cities in one state; a cross-cutting dimension like Segment
+appears in every region and is never offered). A breadcrumb row climbs back up. Works in the chat and on dashboards.
 
 **Dashboards.** **Add to dashboard** under any answer pins its query. The **Dashboard** view runs every pinned query
 again, live – headline numbers on top as stat tiles, charts below – with reorder, remove, refresh, and **Download
