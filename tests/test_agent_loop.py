@@ -112,3 +112,16 @@ def test_claude_loop_fixes_error_and_answers(monkeypatch, tmp_path):
     assert r["final_sql"] == "SELECT YEAR(Sale_Date) FROM Sales"
     assert sent[1]["content"][0]["is_error"] is True          # the error went back to the model
     assert r["model"] == agent.CLAUDE_MODEL
+
+
+def test_final_sql_is_the_query_shown_in_the_answer(monkeypatch, tmp_path):
+    """A side check (NULL dates) runs last, but the answer's SQL block is what gets logged."""
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(agent, "run_query", lambda sql: {"columns": [], "rows": [], "row_count": 0, "truncated": False})
+    client = fake_client([
+        ([("run_query", {"sql": "SELECT YEAR(d), COUNT(*) FROM Sales GROUP BY YEAR(d)"})], None),
+        ([("run_query", {"sql": "SELECT COUNT(*) FROM Sales WHERE d IS NULL"})], None),
+        ([], "Answer\n```sql\nSELECT YEAR(d), COUNT(*) FROM Sales GROUP BY YEAR(d)\n```"),
+    ])
+    r = agent.ask("q", client=client, verbose=False)
+    assert r["final_sql"] == "SELECT YEAR(d), COUNT(*) FROM Sales GROUP BY YEAR(d)"

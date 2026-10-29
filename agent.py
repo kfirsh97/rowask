@@ -17,6 +17,7 @@ Provider: set PROVIDER=gemini (default) or PROVIDER=claude in .env.
 """
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -235,13 +236,17 @@ def ask(question: str, client=None, verbose=True, provider=None) -> dict:
     started = time.time()
     run = _run_claude if provider == "claude" else _run_gemini
     answer, steps, last_sql, model = run(question, client, verbose)
+    # The query that actually produced the answer is the one the model shows in its ```sql block.
+    # The last successful query can be a side check (e.g. "are there NULL dates?"), so prefer the block.
+    shown = re.findall(r"```sql\s*(.*?)```", answer or "", flags=re.S | re.I)
+    final_sql = shown[-1].strip() if shown else last_sql
 
     record = {
         "time": datetime.now().isoformat(timespec="seconds"),
         "model": model,
         "question": question,
         "answer": answer,
-        "final_sql": last_sql,
+        "final_sql": final_sql,
         "steps": steps,
         "seconds": round(time.time() - started, 1),
     }
