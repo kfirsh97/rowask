@@ -7,6 +7,7 @@ Title, description and example questions come from the active profile (DB_PROFIL
 import glob
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -133,10 +134,10 @@ with st.sidebar:
     st.caption("Read-only connection. Only single SELECT queries reach the database, each stopped after "
                "30 seconds. At most 8 steps per question.")
     st.markdown("#### Conversation")
-    turns = len(st.session_state.get("history", []))
+    turns = sum(1 for h in st.session_state.get("history", []) if not h["run"].get("stopped"))
     st.caption(f"The agent sees the last {min(turns, 6)} of {turns} earlier turns, so follow-up questions work."
                if turns else "Follow-up questions see the earlier turns of this chat.")
-    if st.button("New conversation", icon=":material/add_comment:", disabled=not turns):
+    if st.button("New conversation", icon=":material/add_comment:", disabled=not st.session_state.get("history")):
         st.session_state.history = []
         st.session_state.chat_id = st.session_state.get("chat_id", 0) + 1   # fresh example picker too
         st.rerun()
@@ -192,7 +193,7 @@ def show_result(run):
             f'{run["seconds"]:.1f} s</div>')
 
 
-def run_demo(question, status, live, history=None):
+def run_demo(question, status, live, history, job):
     from demo_runs import DEMO_RUNS
     rec = DEMO_RUNS.get(question)
     if rec is None:
@@ -200,21 +201,33 @@ def run_demo(question, status, live, history=None):
         return None
     for i in range(1, len(rec["steps"]) + 1):
         time.sleep(0.7)
+        job["steps"][:] = rec["steps"][:i]
         live.html(trace_html(rec["steps"][:i]))
     return rec
 
 
-def run_live(question, status, live, history):
+def run_live(question, status, live, history, job):
+    """The agent runs in a background thread while this page keeps redrawing its steps - so the page stays
+    responsive, and a click on Stop ends the run at once instead of after the current model call."""
     os.environ["SCHEMA_NOTES"] = "on" if notes else "off"
     import agent
     from tools import run_query_all
-    steps = []
 
-    def on_step(step):
-        steps.append(step)
-        live.html(trace_html(steps))
+    def work():
+        try:
+            job["result"] = agent.ask(question, verbose=False, provider=provider, on_step=job["steps"].append,
+                                      history=history, should_stop=job["cancel"].is_set)
+        except Exception as e:
+            job["error"] = e
 
-    r = agent.ask(question, verbose=False, provider=provider, on_step=on_step, history=history)
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    while worker.is_alive():
+        live.html(trace_html(job["steps"]))      # every redraw is also the moment Streamlit can notice a Stop click
+        worker.join(0.25)
+    if job.get("error"):
+        raise job["error"]
+    r = job["result"]
     rec = {**r, "columns": [], "rows": []}
     if r.get("final_sql"):
         try:
@@ -225,17 +238,35 @@ def run_live(question, status, live, history):
 
 
 # ------------------------------------------------------------------ conversation
+def abandon(job):
+    """The page was rerun while the agent was working - the Stop button, or any other click. Tell the
+    background agent to stop before its next model call, and keep the question in the chat as stopped."""
+    job["cancel"].set()
+    st.session_state.history.append({"question": job["question"], "run": {
+        "answer": "_Stopped. The agent finishes the model call already in progress, then makes no more._",
+        "steps": list(job["steps"]), "final_sql": None, "columns": [], "rows": [], "stopped": True,
+        "model": "stopped", "seconds": time.time() - job["started"]}})
+    st.session_state.job = None
+
+
 if DEMO:
     st.html('<div class="demo-note">Demo mode: replaying two real runs recorded on 29 October 2026. '
             "Pick one of the first two example questions.</div>")
 
 if "history" not in st.session_state:
     st.session_state.history = []
+if st.session_state.get("job"):
+    abandon(st.session_state.job)
 
 for item in st.session_state.history:
     with st.chat_message("user", avatar=":material/person:"):
         md(item["question"])
     with st.chat_message("assistant", avatar=":material/database:"):
+        if item["run"].get("stopped"):
+            md(item["run"]["answer"])
+            if item["run"]["steps"]:
+                st.html(trace_html(item["run"]["steps"]))
+            continue
         if item["run"]["steps"]:          # a plain chat reply has no steps to show
             n_steps = len(item["run"]["steps"])
             with st.expander(f"How the agent got there ({n_steps} step{'s' if n_steps != 1 else ''})"):
@@ -254,12 +285,18 @@ if question:
         md(question)
     with st.chat_message("assistant", avatar=":material/database:"):
         with st.status("Working on it", expanded=True) as status:
+            st.button("Stop", icon=":material/stop_circle:", key=f"stop{len(st.session_state.history)}",
+                      help="Stop this question. The agent makes no further model calls.")
             live = st.empty()
+            job = {"question": question, "steps": [], "cancel": threading.Event(), "started": time.time()}
+            st.session_state.job = job
             try:
                 earlier = [{"question": h["question"], "answer": h["run"]["answer"]}
-                           for h in st.session_state.history]
-                run = (run_demo if DEMO else run_live)(question, status, live, earlier)
+                           for h in st.session_state.history if not h["run"].get("stopped")]
+                run = (run_demo if DEMO else run_live)(question, status, live, earlier, job)
+                st.session_state.job = None
             except Exception as e:
+                st.session_state.job = None
                 run = None
                 msg = str(e)
                 if "credit balance" in msg.lower():

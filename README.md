@@ -86,7 +86,7 @@ pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
 python check_setup.py          # DB connection, read-only check, API key check
 python -m streamlit run app.py # web chat on http://localhost:8501
-python -m pytest tests         # 68 tests (3 need a PostgreSQL server), no API key needed
+python -m pytest tests         # 69 tests (3 need a PostgreSQL server), no API key needed
 ```
 
 ## Files
@@ -111,6 +111,7 @@ DEMO=1 python -m streamlit run app.py    # replays two recorded runs - no databa
 ```
 
 A chat: ask in Hebrew or English, then keep going with follow-up questions – the agent remembers the
-conversation, and **New conversation** in the sidebar starts over. Watch each step as it happens: the schema read, every query with its row count,
+conversation, and **New conversation** in the sidebar starts over. **Stop** ends a question mid-way: the agent
+runs in the background, checks before every model call, and makes no more calls once stopped. Watch each step as it happens: the schema read, every query with its row count,
 then the answer, the result table and the SQL behind it. The sidebar switches between Claude and Gemini and
 turns the business notes on or off.

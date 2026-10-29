@@ -147,7 +147,7 @@ def _history_pairs(history):
     Only the text goes back to the model - not the earlier tool calls - which keeps every
     request small and lets either provider continue a conversation the other one started."""
     pairs = [(h.get("question"), h.get("answer")) for h in (history or [])]
-    return [(q, a) for q, a in pairs if q and a][-HISTORY_TURNS:]
+    return [(q, a) for q, a in pairs if q and a and a != STOPPED][-HISTORY_TURNS:]
 
 
 def make_client():
@@ -160,7 +160,10 @@ def make_client():
     ))
 
 
-def _run_gemini(question, client, verbose, on_step=None, history=None):
+STOPPED = "Stopped - you stopped this question before the agent finished."
+
+
+def _run_gemini(question, client, verbose, on_step=None, history=None, should_stop=None):
     """Agent loop on Gemini. Returns (answer, steps, last_sql, model_used)."""
     client = client or make_client()
     config = types.GenerateContentConfig(
@@ -179,6 +182,9 @@ def _run_gemini(question, client, verbose, on_step=None, history=None):
 
     model = MODEL
     for step in range(1, MAX_STEPS + 1):
+        if should_stop and should_stop():      # checked before every model call: a stop costs no further API calls
+            answer = STOPPED
+            break
         if step == 1:
             # If the main model is overloaded, switch before the conversation starts.
             # (We never switch mid-conversation: a model may not accept another model's turns.)
@@ -239,7 +245,7 @@ CLAUDE_TOOLS = [
 ]
 
 
-def _run_claude(question, client, verbose, on_step=None, history=None):
+def _run_claude(question, client, verbose, on_step=None, history=None, should_stop=None):
     """The same agent loop on Claude. Returns (answer, steps, last_sql, model_used).
     Same tools, same prompt, same safety - only the API format differs."""
     if client is None:
@@ -253,6 +259,9 @@ def _run_claude(question, client, verbose, on_step=None, history=None):
     steps, last_sql, answer = [], None, None
     system = system_prompt()
     for step in range(1, MAX_STEPS + 1):
+        if should_stop and should_stop():
+            answer = STOPPED
+            break
         if verbose:
             print(f"  ... thinking ({CLAUDE_MODEL})", flush=True)
         response = client.messages.create(
@@ -285,18 +294,21 @@ def _run_claude(question, client, verbose, on_step=None, history=None):
     return answer, steps, last_sql, CLAUDE_MODEL
 
 
-def ask(question: str, client=None, verbose=True, provider=None, on_step=None, history=None) -> dict:
+def ask(question: str, client=None, verbose=True, provider=None, on_step=None, history=None,
+        should_stop=None) -> dict:
     """Run the agent for one question on the chosen provider ("gemini" or "claude", from .env PROVIDER).
     history: earlier turns of the same chat, as [{"question": ..., "answer": ...}], oldest first.
+    should_stop: optional function, checked before every model call; when it returns True the agent stops.
     Returns the answer, the last SQL and every step, and writes them to the log."""
     provider = (provider or os.environ.get("PROVIDER", "gemini")).lower()
     started = time.time()
     run = _run_claude if provider == "claude" else _run_gemini
-    answer, steps, last_sql, model = run(question, client, verbose, on_step, history)
+    answer, steps, last_sql, model = run(question, client, verbose, on_step, history, should_stop)
+    stopped = answer == STOPPED
     # The query that actually produced the answer is the one the model shows in its ```sql block.
     # The last successful query can be a side check (e.g. "are there NULL dates?"), so prefer the block.
     shown = re.findall(r"```sql\s*(.*?)```", answer or "", flags=re.S | re.I)
-    final_sql = shown[-1].strip() if shown else last_sql
+    final_sql = None if stopped else (shown[-1].strip() if shown else last_sql)
 
     record = {
         "time": datetime.now().isoformat(timespec="seconds"),
@@ -307,6 +319,7 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
         "final_sql": final_sql,
         "steps": steps,
         "seconds": round(time.time() - started, 1),
+        "stopped": stopped,
     }
     LOG_DIR.mkdir(exist_ok=True)
     with open(LOG_DIR / f"{datetime.now():%Y-%m-%d}.jsonl", "a", encoding="utf-8") as f:

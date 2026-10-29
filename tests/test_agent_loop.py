@@ -208,3 +208,21 @@ def test_plain_chat_reply_runs_no_query(monkeypatch, tmp_path):
     client = fake_client([([], "בשמחה! יש עוד משהו שתרצה לבדוק?")])
     r = agent.ask("תודה!", client=client, verbose=False, history=HISTORY)
     assert r["steps"] == [] and r["final_sql"] is None
+
+
+def test_stop_request_ends_the_run_before_the_next_model_call(monkeypatch, tmp_path):
+    """The web page's Stop button: the agent checks before every model call, so a stop costs no more API calls."""
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(agent, "run_query", lambda sql: {"columns": [], "rows": [], "row_count": 0, "truncated": False})
+    stop = {"now": False}
+
+    def on_step(step):
+        stop["now"] = True                     # the user clicks Stop while step 1's query runs
+
+    client = fake_client([([("run_query", {"sql": "SELECT 1"})], None), ([], "never reached")])
+    r = agent.ask("q", client=client, verbose=False, on_step=on_step, should_stop=lambda: stop["now"])
+    assert r["stopped"] is True and r["answer"] == agent.STOPPED
+    assert len(client.models.seen) == 1        # one model call, none after the stop
+    assert [s["tool"] for s in r["steps"]] == ["run_query"] and r["final_sql"] is None
+    # a stopped turn is not sent back to the model as conversation history
+    assert agent._history_pairs([{"question": "q", "answer": agent.STOPPED}]) == []
