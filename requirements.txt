@@ -6,6 +6,8 @@ pandas==2.3.3
 openpyxl==3.1.5
 xlrd==2.0.2
 charset-normalizer==3.4.4
+altair==6.3.0
+sqlglot==30.26.0
 google-genai==2.34.0
 anthropic==2.3.0
 python-dotenv==1.2.4

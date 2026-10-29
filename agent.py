@@ -62,7 +62,18 @@ Conversation:
 Final answer:
 - Answer in the same language as the question, short and clear, with the key numbers.
 - If you ran a query for this message, show the final SQL query you used after the answer,
-  in a ```sql code block. Do not add a SQL block for a query you did not run in this turn."""
+  in a ```sql code block. Do not add a SQL block for a query you did not run in this turn.
+
+Charts:
+- When the user asks for a chart, graph, plot, dashboard item or anything visual ("גרף", "תרשים", "ויזואלי") -
+  or the answer is a trend over time or a comparison across several groups - add a ```chart block after the
+  SQL block, naming columns of your final query:
+  {{"type": "bar" | "line" | "area" | "stacked_bar" | "grouped_bar" | "scatter" | "stat",
+   "x": "<column>", "y": "<one numeric column>", "color": "<column that splits the series, or null>"}}
+  line/area for change over time, bar for comparing groups, grouped/stacked bar for two groupings,
+  stat for a single number. One measure only - never two measures with different scales on one chart.
+- The app draws the chart from the real result of that query, so never put numbers in the chart block.
+  Make the query return exactly the rows the chart needs, sorted sensibly (time ascending, or largest first)."""
 
 
 
@@ -309,6 +320,8 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
     # The last successful query can be a side check (e.g. "are there NULL dates?"), so prefer the block.
     shown = re.findall(r"```sql\s*(.*?)```", answer or "", flags=re.S | re.I)
     final_sql = None if stopped else (shown[-1].strip() if shown else last_sql)
+    import charts
+    chart, answer = charts.parse_spec(answer)        # the chart block is for the app, not for the reader
 
     record = {
         "time": datetime.now().isoformat(timespec="seconds"),
@@ -317,6 +330,7 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
         "history_turns": len(_history_pairs(history)),
         "answer": answer,
         "final_sql": final_sql,
+        "chart": chart,
         "steps": steps,
         "seconds": round(time.time() - started, 1),
         "stopped": stopped,

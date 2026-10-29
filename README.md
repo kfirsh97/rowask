@@ -87,7 +87,7 @@ pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
 python check_setup.py          # DB connection, read-only check, API key check
 python -m streamlit run app.py # web chat on http://localhost:8501
-python -m pytest tests         # 78 tests (3 need a PostgreSQL server), no API key needed
+python -m pytest tests         # 95 tests (3 need a PostgreSQL server), no API key needed
 ```
 
 ## Files
@@ -101,6 +101,8 @@ python -m pytest tests         # 78 tests (3 need a PostgreSQL server), no API k
 | `db.py` | Connects to any database (SQLAlchemy); read-only sessions, 30-second query limit, dialect hints for the model |
 | `dbprofile.py` · `profiles/` | Per-database knowledge: business line, notes, example questions |
 | `upload.py` | Uploads on the web page: reading CSV/Excel, cleaning, building the session's database, describing it |
+| `sqlimport.py` | SQL scripts from any dialect into SQLite: splitting, translating, IDENTITY values, foreign keys, the guard |
+| `charts.py` · `dashboards.py` | Charts drawn from query rows (form, palette, marks); pinned dashboards and the HTML export |
 | `data/` | SQLite copies: Porsche (built by `setup/build_sqlite.py`) and the Chinook sample database |
 | `check_setup.py` · `setup/` · `SETUP.md` | Setup check, read-only user, SQLite builder, CSV importer, setup guide |
 | `tests/` | Safety, agent loop (with a fake model), real-database tests on SQLite and PostgreSQL, comparison and evaluation |
@@ -116,7 +118,25 @@ A chat: ask in Hebrew or English, then keep going with follow-up questions – t
 conversation, and **New conversation** in the sidebar starts over. **Stop** ends a question mid-way: the agent
 runs in the background, checks before every model call, and makes no more calls once stopped.
 
-**Upload your own data** in the sidebar – CSV, Excel (every sheet becomes a table) or a SQLite file. CSV and Excel
+**Charts.** An answer that is a trend, a comparison or a single number gets a chart next to its table – the
+model only suggests the encoding (bar, line, grouped bar, stat tile...), and the chart is drawn from the real rows of
+its query, so it can never show a number the database didn't return. Ask for one in words too ("show it as a graph").
+The form follows the data's job, there is only ever one y-axis, and the colors are a fixed, validated order
+(color-blind checks run with the data-viz skill's validator); every chart has its table twin.
+
+**Dashboards.** **Add to dashboard** under any answer pins its query. The **Dashboard** view runs every pinned query
+again, live – headline numbers on top as stat tiles, charts below – with reorder, remove, refresh, and **Download
+HTML**: one standalone page with the charts, the table and the SQL behind each, to send to someone without the app.
+
+**Upload your own data** in the sidebar – CSV, Excel (every sheet becomes a table), **SQL scripts**, or a SQLite file.
+A SQL script (CREATE TABLE + INSERT – a dump, or a course project like this one's `sql/` folder) can be written for
+SQL Server, MySQL, PostgreSQL or SQLite: it is translated where needed (sqlglot), server-only statements are skipped,
+IDENTITY keys keep their original values, and foreign keys added later with ALTER TABLE are kept so the agent can
+JOIN a normalized schema. Uploading this project's own two T-SQL files rebuilds all 18 tables and 58,339 rows exactly.
+The script runs in its own database file under a guard that refuses anything able to reach outside it (ATTACH,
+VACUUM INTO, PRAGMA, extensions).
+
+CSV and Excel uploads: CSV and Excel
 are cleaned on the way in and the page lists every change: SQL-safe column names, dates as `YYYY-MM-DD`, codes that
 Excel turned into `77095.0` back to `77095`, `"$1,234"` and `"45%"` as numbers, curly quotes made plain, empty rows
 dropped. Hebrew files saved by Excel on Windows are detected and read correctly. The agent also gets a description of

@@ -1,5 +1,5 @@
-"""Upload your own data: clean CSV / Excel files (or take a SQLite file as it is), build a database from them,
-and describe it for the agent.
+"""Upload your own data: clean CSV / Excel files, run SQL scripts (any dialect - see sqlimport.py), or take a
+SQLite file as it is; build a database from them, and describe it for the agent.
 
 The cleaning makes general the steps of a manual pandas clean-up of the Superstore Excel export:
   - column names: spaces, slashes, dashes and other symbols -> "_" (Hebrew letters are kept)
@@ -25,6 +25,8 @@ import pandas as pd
 
 TABLE_EXTENSIONS = {".csv", ".txt", ".tsv", ".xlsx", ".xlsm", ".xls"}
 SQLITE_EXTENSIONS = {".sqlite", ".sqlite3", ".db"}
+SQL_EXTENSIONS = {".sql"}
+DIALECT_NAMES = {"tsql": "SQL Server (T-SQL)", "mysql": "MySQL", "postgres": "PostgreSQL", "sqlite": "SQLite / standard SQL"}
 MAX_NOTES_CHARS = 8000          # the data description sent to the model with the schema
 
 PLAIN = str.maketrans({"“": '"', "”": '"', "„": '"', "‘": "'", "’": "'",
@@ -339,7 +341,32 @@ def build(files: list, out_dir: Path) -> Upload:
         up.report.append(f"{name}: a SQLite database - used as it is, no cleaning")
     else:
         con = sqlite3.connect(path)
+        scripts = sorted([(n, d) for n, d in files if Path(n).suffix.lower() in SQL_EXTENSIONS])   # 01_schema before 02_data
+        if scripts:
+            import sqlimport
+            # one run over all scripts in file-name order: a schema file and a data file act as one script
+            # (auto-numbered keys are set after the data is in, foreign keys after every table exists)
+            text = "\n;\n".join(_decode(d)[0] for _, d in scripts)
+            r = sqlimport.run_script(con, text)
+            con.isolation_level = ""
+            name = ", ".join(n for n, _ in scripts)
+            line = f"{name}: {DIALECT_NAMES.get(r['dialect'], r['dialect'])} script, {r['statements']:,} statements run"
+            if r["skipped"]:
+                line += " - skipped (server-only): " + ", ".join(f"{n} {k}" for k, n in r["skipped"].items())
+            up.report.append(line)
+            if r["identities"]:
+                up.report.append(f"auto-numbered keys given the same values the original server would give "
+                                 f"({r['identities']} table(s))")
+            if r["foreign_keys"]:
+                up.report.append(f"{r['foreign_keys']} foreign key(s) added by ALTER TABLE were built into the tables, "
+                                 "so the agent sees how they link")
+            for err in r["errors"][:5]:
+                up.report.append(f"could not run - {err}")
+            if len(r["errors"]) > 5:
+                up.report.append(f"... and {len(r['errors']) - 5} more statement(s) that could not run")
         for name, data in files:
+            if Path(name).suffix.lower() in SQL_EXTENSIONS:
+                continue
             frames, how = read_tables(name, data)
             up.report.append(how)
             for table, raw in frames.items():

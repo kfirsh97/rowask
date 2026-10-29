@@ -16,6 +16,8 @@ from pathlib import Path
 
 import streamlit as st
 
+import charts
+import dashboards
 import db
 import dbprofile
 import upload as uploads
@@ -27,7 +29,7 @@ HERE = Path(__file__).parent
 def esc(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 DEMO = os.environ.get("DEMO", "").lower() in ("1", "true", "yes")
-UPLOAD_TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "xls", "sqlite", "sqlite3", "db"]
+UPLOAD_TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "xls", "sql", "sqlite", "sqlite3", "db"]
 
 
 def sync_upload():
@@ -42,11 +44,13 @@ def sync_upload():
         uploads.remove(old)
     st.session_state.upload_sig, st.session_state.upload_error = signature, None
     st.session_state.history = []                                   # new data, new conversation
+    st.session_state.dash_upload = []                               # and an empty dashboard for it
     st.session_state.chat_id = st.session_state.get("chat_id", 0) + 1
     if files:
         try:
-            st.session_state.upload = uploads.build([(f.name, f.getvalue()) for f in files],
-                                                    Path(tempfile.mkdtemp(prefix="sql-agent-upload-")))
+            with st.spinner("Loading your files - a large SQL script can take a few seconds..."):
+                st.session_state.upload = uploads.build([(f.name, f.getvalue()) for f in files],
+                                                        Path(tempfile.mkdtemp(prefix="sql-agent-upload-")))
         except Exception as e:
             st.session_state.upload_error = str(e)
 
@@ -120,6 +124,11 @@ st.html("""
 .score span { color: var(--steel); }
 [data-testid="stSidebar"] .stMarkdown p { font-size: .92rem; }
 .stApp code, .stApp pre { font-family: var(--mono) !important; }
+.stat { background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: .8rem 1rem; }
+.stat-label { color: var(--steel); font-size: .85rem; unicode-bidi: plaintext; }
+.stat-value { font-size: 2rem; font-weight: 600; color: var(--slate); line-height: 1.2; }
+.stat-caption { color: var(--steel); font-size: .78rem; unicode-bidi: plaintext; }
+.dash-title { font-weight: 600; color: var(--slate); unicode-bidi: plaintext; text-align: start; margin-bottom: .3rem; }
 .rtl, .rtl p, .rtl li { direction: rtl; text-align: right; unicode-bidi: normal; }
 .rtl ul, .rtl ol { padding-right: 1.4rem; padding-left: 0; }
 </style>
@@ -164,10 +173,12 @@ with st.sidebar:
     notes = st.toggle("Business notes in the schema", value=True, disabled=DEMO, key="notes",
                       help="Currency, units and value formats the raw schema cannot tell the model.")
     st.markdown("#### Your data")
-    st.file_uploader("Upload CSV, Excel or a SQLite database", type=UPLOAD_TYPES, accept_multiple_files=True,
-                     key=f"files{st.session_state.get('upload_gen', 0)}", disabled=DEMO,
-                     help="Files are cleaned (column names, dates, numbers, codes) and loaded into a database "
-                          "for this browser session only. Remove them to go back to the default database.")
+    st.file_uploader("Upload CSV, Excel, SQL scripts or a SQLite database", type=UPLOAD_TYPES,
+                     accept_multiple_files=True, key=f"files{st.session_state.get('upload_gen', 0)}", disabled=DEMO,
+                     help="CSV and Excel are cleaned (column names, dates, numbers, codes). SQL scripts - CREATE TABLE "
+                          "and INSERT, from SQL Server, MySQL, PostgreSQL or SQLite - are run in order of file name. "
+                          "Everything is loaded into a database for this browser session only. Remove the files "
+                          "to go back to the default database.")
     if st.session_state.get("upload_error"):
         st.error(st.session_state.upload_error)
     st.markdown("#### Database")
@@ -229,17 +240,50 @@ def md(text):
         st.markdown(text)
 
 
-def show_result(run):
-    md(run["answer"] or "_No answer._")
+def table(columns, rows):
+    import pandas as pd
+    df = pd.DataFrame([list(r) for r in rows], columns=columns)
+    cfg = {c: st.column_config.NumberColumn(format="localized")
+           for c in df.select_dtypes("number").columns if "year" not in str(c).lower()}
+    st.dataframe(df, hide_index=True, width="stretch", column_config=cfg)
+
+
+def draw(spec, columns, rows, height=300) -> bool:
+    """Draw a chart (or a stat tile) from real query rows. False when this result has no chart."""
+    out = charts.build(spec, columns, rows, height=height) if spec else None
+    if out is None:
+        return False
+    if isinstance(out, tuple):
+        st.html(charts.stat_html(out[1], out[2]))
+    else:
+        st.altair_chart(charts.style(out), width="stretch", theme=None)   # theme=None keeps the chart's own styling
+    return True
+
+
+def show_result(run, question=None, key=None):
+    import re
+    text = re.sub(r"```sql.*?```", "", run["answer"] or "", flags=re.S | re.I).strip()   # SQL has its own expander
+    md(text or "_No answer._")
+    spec = None
     if run.get("rows"):
-        import pandas as pd
-        df = pd.DataFrame(run["rows"], columns=run["columns"])
-        cfg = {c: st.column_config.NumberColumn(format="localized")
-               for c in df.select_dtypes("number").columns if "year" not in c.lower()}
-        st.dataframe(df, hide_index=True, width="stretch", column_config=cfg)
+        spec = charts.check_spec(run.get("chart"), run["columns"]) or charts.auto_spec(run["columns"], run["rows"])
+        if spec:
+            as_chart, as_table = st.tabs(["Chart", "Table"])      # every chart has its table twin
+            with as_chart:
+                if not draw(spec, run["columns"], run["rows"]):
+                    st.caption("No chart for this result.")
+            with as_table:
+                table(run["columns"], run["rows"])
+        else:
+            table(run["columns"], run["rows"])
     if run.get("final_sql"):
         with st.expander("SQL behind this answer"):
             st.code(run["final_sql"], language="sql")
+    if key is not None and run.get("final_sql") and run.get("rows"):
+        pinned = any(i["sql"] == run["final_sql"].strip() for i in dash_items())
+        st.button("On the dashboard" if pinned else "Add to dashboard", key=f"pin{key}", disabled=pinned,
+                  icon=":material/check:" if pinned else ":material/dashboard_customize:",
+                  on_click=pin, args=(question, run["final_sql"], run.get("chart") or spec))
     steps = len(run["steps"])
     st.html(f'<div class="meta">{run["model"]}, {steps} step{"s" if steps != 1 else ""}, '
             f'{run["seconds"]:.1f} s</div>')
@@ -290,7 +334,6 @@ def run_live(question, status, live, history, job):
     return rec
 
 
-# ------------------------------------------------------------------ conversation
 def abandon(job):
     """The page was rerun while the agent was working - the Stop button, or any other click. Tell the
     background agent to stop before its next model call, and keep the question in the chat as stopped."""
@@ -302,6 +345,114 @@ def abandon(job):
     st.session_state.job = None
 
 
+# ------------------------------------------------------------------ dashboard
+def dash_items() -> list:
+    """This database's dashboard: saved on this computer per profile; for an upload, kept in this session only."""
+    if UPLOAD:
+        return st.session_state.setdefault("dash_upload", [])
+    store = st.session_state.setdefault("dash", {})
+    if PROFILE["name"] not in store:
+        store[PROFILE["name"]] = dashboards.load(PROFILE["name"])
+    return store[PROFILE["name"]]
+
+
+def dash_save():
+    if not UPLOAD and not DEMO:
+        dashboards.save(PROFILE["name"], dash_items())
+
+
+def pin(question, sql, chart):
+    dash_items().append(dashboards.new_item(question or "Untitled", sql, chart))
+    dash_save()
+    st.toast("Added to the dashboard", icon=":material/dashboard_customize:")
+
+
+def unpin(item_id):
+    items = dash_items()
+    items[:] = [i for i in items if i["id"] != item_id]
+    dash_save()
+
+
+def move(item_id, step):
+    items = dash_items()
+    i = next(k for k, it in enumerate(items) if it["id"] == item_id)
+    j = max(0, min(len(items) - 1, i + step))
+    items[i], items[j] = items[j], items[i]
+    dash_save()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def run_item(url, sql, chart_json):
+    """Cached per database and query; 'Refresh' clears it. The url keeps different databases apart."""
+    return dashboards.run({"sql": sql, "chart": json.loads(chart_json)})
+
+
+def card_controls(item):
+    left, right, drop = st.columns([1, 1, 4], gap="small")
+    left.button("", icon=":material/arrow_back:", key=f"l{item['id']}", help="Move earlier",
+                on_click=move, args=(item["id"], -1))
+    right.button("", icon=":material/arrow_forward:", key=f"r{item['id']}", help="Move later",
+                 on_click=move, args=(item["id"], 1))
+    drop.button("Remove", icon=":material/close:", key=f"x{item['id']}", on_click=unpin, args=(item["id"],))
+
+
+def render_dashboard():
+    items = dash_items()
+    if not items:
+        st.info("Nothing here yet. In the chat, ask for something - a total, a trend, a comparison - and press "
+                "**Add to dashboard** under the answer. Every item runs its query again whenever the dashboard "
+                "opens, so the numbers are always current.", icon=":material/dashboard_customize:")
+        return
+    url = db.database_url()
+    results = {i["id"]: run_item(url, i["sql"], json.dumps(i.get("chart"))) for i in items}
+    head, refresh, download = st.columns([4, 1.2, 1.6], vertical_alignment="center")
+    head.caption(f"{len(items)} item{'s' if len(items) != 1 else ''} · runs live on {db.describe()}")
+    if refresh.button("Refresh", icon=":material/refresh:"):
+        run_item.clear()
+        st.rerun()
+    download.download_button(
+        "Download HTML", icon=":material/download:", mime="text/html",
+        file_name=f"{PROFILE['name']}-dashboard.html",
+        data=dashboards.export_html(f"{PROFILE['title']} dashboard", PROFILE["description"].split(".")[0] + ".",
+                                    items, results))
+
+    stats = [i for i in items if (results[i["id"]]["spec"] or {}).get("type") == "stat"]
+    others = [i for i in items if i not in stats]
+    for row in range(0, len(stats), 4):                           # headline numbers first, up to 4 a row
+        for col, item in zip(st.columns(4), stats[row:row + 4]):
+            with col:
+                res = results[item["id"]]
+                _, label, value = charts.build(res["spec"], res["columns"], res["rows"])
+                st.html(charts.stat_html(item["title"], value, label))
+                st.button("Remove", key=f"x{item['id']}", icon=":material/close:", on_click=unpin, args=(item["id"],))
+    cols = st.columns(2, gap="medium")
+    for k, item in enumerate(others):
+        res = results[item["id"]]
+        with cols[k % 2], st.container(border=True):
+            st.html(f'<div class="dash-title">{esc(item["title"])}</div>')
+            if res["error"]:
+                st.error(f"This query no longer runs: {res['error']}")
+            elif not draw(res["spec"], res["columns"], res["rows"], height=260):
+                table(res["columns"], res["rows"])
+            with st.expander("Table and SQL"):
+                if not res["error"]:
+                    table(res["columns"], res["rows"])
+                st.code(item["sql"], language="sql")
+            card_controls(item)
+
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+view = st.segmented_control("View", ["Chat", "Dashboard"], default="Chat", key="view", label_visibility="collapsed",
+                            format_func=lambda v: f"Dashboard ({len(dash_items())})" if v == "Dashboard" else v)
+if view == "Dashboard":
+    if st.session_state.get("job"):          # leaving the chat while the agent works stops it, like Stop does
+        abandon(st.session_state.job)
+    render_dashboard()
+    st.stop()
+
+
+# ------------------------------------------------------------------ conversation
 if DEMO:
     st.html('<div class="demo-note">Demo mode: replaying two real runs recorded on 29 October 2026. '
             "Pick one of the first two example questions.</div>")
@@ -311,7 +462,7 @@ if "history" not in st.session_state:
 if st.session_state.get("job"):
     abandon(st.session_state.job)
 
-for item in st.session_state.history:
+for n, item in enumerate(st.session_state.history):
     with st.chat_message("user", avatar=":material/person:"):
         md(item["question"])
     with st.chat_message("assistant", avatar=":material/database:"):
@@ -324,7 +475,7 @@ for item in st.session_state.history:
             n_steps = len(item["run"]["steps"])
             with st.expander(f"How the agent got there ({n_steps} step{'s' if n_steps != 1 else ''})"):
                 st.html(trace_html(item["run"]["steps"]))
-        show_result(item["run"])
+        show_result(item["run"], question=item["question"], key=f"{st.session_state.get('chat_id', 0)}-{n}")
 
 picked = None
 if EXAMPLES and not st.session_state.history:   # examples only start a chat; after that, the user just keeps talking

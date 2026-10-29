@@ -107,3 +107,45 @@ def test_upload_is_for_this_session_only(tmp_path):
         db.SESSION_URL.set(None)
         dbprofile.SESSION_PROFILE.set(None)
     assert dbprofile.load_profile()["name"] != "upload"
+
+
+# ------------------------------------------------------------------ SQL scripts
+SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
+
+
+def test_porsche_sql_server_scripts_load_exactly(tmp_path):
+    """This project's own T-SQL files, uploaded as they are: same 18 tables, rows and IDENTITY keys as SQL Server."""
+    files = [(p.name, p.read_bytes()) for p in (SQL_DIR / "02_seed_data.sql", SQL_DIR / "01_schema.sql")]  # any order
+    up = upload.build(files, tmp_path / "up")
+    assert len(up.tables) == 18 and sum(up.tables.values()) == 58_339
+    assert rows(up, "SELECT MIN(PolicyID), MAX(PolicyID) FROM Policy") == [(792832, 4558163)]
+    report = "\n".join(up.report)
+    assert "SQL Server (T-SQL) script" in report and "could not run" not in report
+    links = sqlite3.connect(up.path).execute("PRAGMA foreign_key_list(Sales)").fetchall()
+    assert {r[2] for r in links} == {"CARS", "Customers", "Sellers"}          # the agent can still see the JOINs
+
+
+def test_mysql_dump_with_foreign_keys_added_later(tmp_path):
+    script = b"""
+    CREATE DATABASE shop; USE shop;
+    CREATE TABLE `customer` (`id` INT NOT NULL AUTO_INCREMENT, `name` VARCHAR(40), PRIMARY KEY (`id`)) ENGINE=InnoDB;
+    CREATE TABLE `orders` (`id` INT NOT NULL, `customer_id` INT, `total` DECIMAL(10,2), PRIMARY KEY (`id`)) ENGINE=InnoDB;
+    INSERT INTO `customer` (`name`) VALUES ('Dana'), ('O\\'Brien');
+    INSERT INTO `orders` VALUES (1, 1, 99.90), (2, 2, 10);
+    ALTER TABLE `orders` ADD CONSTRAINT `fk_c` FOREIGN KEY (`customer_id`) REFERENCES `customer` (`id`);
+    """
+    up = upload.build([("shop.sql", script)], tmp_path / "up")
+    assert rows(up, "SELECT c.name, o.total FROM orders o JOIN customer c ON c.id = o.customer_id ORDER BY o.id") == [
+        ("Dana", 99.9), ("O'Brien", 10)]
+    assert any("1 foreign key(s) added" in r for r in up.report) and any("MySQL script" in r for r in up.report)
+
+
+def test_sql_script_cannot_reach_outside_its_database(tmp_path):
+    outside = tmp_path / "outside.db"
+    script = f"""CREATE TABLE t (x INT);
+    ATTACH DATABASE '{outside}' AS e; CREATE TABLE e.stolen (x INT);
+    VACUUM INTO '{tmp_path / "copy.db"}';
+    SELECT load_extension('x');""".encode()
+    up = upload.build([("evil.sql", script)], tmp_path / "up")
+    assert not outside.exists() and not (tmp_path / "copy.db").exists()
+    assert list(up.tables) == ["t"]
