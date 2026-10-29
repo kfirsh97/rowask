@@ -7,6 +7,7 @@ Safety has two layers:
 """
 import datetime
 import decimal
+import os
 import re
 
 from db import connect
@@ -19,7 +20,26 @@ FORBIDDEN = [
     "openrowset", "opendatasource", "xp_", "sp_",
 ]
 
-_schema_cache = None
+_schema_cache = {}
+
+# Business meaning of columns that the raw schema cannot tell the model.
+# Stage 5 measures how much these notes improve accuracy (SCHEMA_NOTES=off turns them off).
+SCHEMA_NOTES = """COLUMN NOTES (business meaning):
+- Sales.Sold_Price: final sale price of the car, in US dollars. Sales.Sold_Date: date of the sale.
+- Sales.Views / Followers / Comments: engagement counts on the car's sale listing.
+- Sellers.Dealer_Or_PrivateParty: 'Dealer' or 'Private Party'. Dealer details are in Dealer_Sellers,
+  private sellers in Private_Seller (both share Seller_ID with Sellers).
+- DealersWithInsurances: which insurance companies (Insurance.InsuranceID) each dealer works with.
+- CARS.YEAR: the car's model year. CARS.Title: listing title, includes the model name (e.g. 'Turbo', 'Carrera').
+- CARS.Mileage: odometer reading in miles.
+- CARS.OWNERS: free text. 'CARFAX 1-Owner vehicle' = one owner; 'NPrevious owners' (no space, e.g. '3Previous owners')
+  = N previous owners; 'Types of owners: ...' lists owner types.
+- Policy.Insurance_Type: 'Mandatory', 'Comprehensive' or 'Third Party'.
+- Services.Service_Cost: cost of one service visit in US dollars (0-3000).
+- Payments.Amount: payment amount in US dollars. Payments.Seller_Commission: the seller's commission in US dollars.
+- ZipCodes.State: full US state name in English (e.g. 'California', 'New York').
+- Customers.FOLLOW / COMMENTS: how many listings the customer follows / comments they wrote.
+- Ages: a car's age in years = YEAR(GETDATE()) - CARS.YEAR."""
 
 
 # ---------------------------------------------------------------- safety
@@ -53,11 +73,16 @@ def validate_query(sql: str):
 
 # ---------------------------------------------------------------- tools
 
+def notes_enabled() -> bool:
+    return os.environ.get("SCHEMA_NOTES", "on").lower() not in ("off", "0", "false", "no")
+
+
 def get_schema() -> str:
-    """Describe every table: its columns with types, and how the tables are linked."""
-    global _schema_cache
-    if _schema_cache:
-        return _schema_cache
+    """Describe every table: its columns with types, how the tables are linked,
+    and (unless SCHEMA_NOTES=off) the business meaning of key columns."""
+    notes = notes_enabled()
+    if notes in _schema_cache:
+        return _schema_cache[notes]
     conn = connect()
     cur = conn.cursor()
     cur.execute("""
@@ -85,8 +110,10 @@ def get_schema() -> str:
     lines = ["TABLES:"]
     lines += [f"- {t}({', '.join(cols)})" for t, cols in tables.items()]
     lines += ["", "FOREIGN KEYS:"] + [f"- {l}" for l in links]
-    _schema_cache = "\n".join(lines)
-    return _schema_cache
+    if notes:
+        lines += ["", SCHEMA_NOTES]
+    _schema_cache[notes] = "\n".join(lines)
+    return _schema_cache[notes]
 
 
 def _jsonable(v):
@@ -95,6 +122,22 @@ def _jsonable(v):
     if isinstance(v, (datetime.date, datetime.datetime)):
         return v.isoformat()
     return v
+
+
+def run_query_all(sql: str, max_rows: int = 100_000):
+    """For evaluation only: run a validated SELECT and return ALL rows as plain tuples (no 50-row cap)."""
+    reason = validate_query(sql)
+    if reason:
+        raise ValueError(f"Query rejected: {reason}")
+    conn = connect()
+    try:
+        cur = conn.cursor(as_dict=False)
+        cur.execute(sql)
+        rows = cur.fetchmany(max_rows)
+        cols = [d[0] for d in cur.description] if cur.description else []
+    finally:
+        conn.close()
+    return cols, [tuple(_jsonable(v) for v in r) for r in rows]
 
 
 def run_query(sql: str) -> dict:
