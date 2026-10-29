@@ -46,7 +46,7 @@ st.html("""
   --mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
 }
 .stApp, .stApp p, .stApp li, .stApp label, .stApp input, .stApp textarea, .stApp h4, .stApp td, .stApp th { font-family: var(--body); }
-.block-container { padding-top: 2.2rem; max-width: 52rem; }
+.block-container { padding-top: 4.6rem; max-width: 52rem; }   /* clears Streamlit's 60px top bar */
 /* Hebrew and English in the same view: every paragraph takes the direction of its first letter */
 [data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li,
 [data-testid="stChatMessageContent"] p, textarea { unicode-bidi: plaintext; text-align: start; }
