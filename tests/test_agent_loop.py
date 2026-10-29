@@ -75,11 +75,11 @@ def test_switches_model_when_main_is_overloaded(monkeypatch, tmp_path):
         def generate_content(self, model, contents, config):
             used.append(model)
             if model == agent.MODEL:
-                raise RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+                raise RuntimeError("504 DEADLINE_EXCEEDED. Deadline expired before operation could complete.")
             content = agent.types.Content(role="model", parts=[agent.types.Part.from_text(text="ok")])
             return SimpleNamespace(function_calls=None, text="answer", candidates=[SimpleNamespace(content=content)])
 
     r = agent.ask("q", client=SimpleNamespace(models=Busy()), verbose=False)
     assert r["answer"] == "answer"
     assert r["model"] == agent.FALLBACK_MODELS[0]
-    assert used.count(agent.MODEL) == 4          # 1 try + 3 retries before switching
+    assert used.count(agent.MODEL) == 2          # 1 try + 1 quick retry before switching

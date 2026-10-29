@@ -76,12 +76,13 @@ def call_tool(name: str, args: dict) -> dict:
     return {"error": f"Unknown tool: {name}"}
 
 
-FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest"]   # used only if the main model is overloaded
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]   # used only if the main model is overloaded
 
 
 def _is_temporary(e: Exception) -> bool:
     msg = str(e)
     return any(t in msg for t in ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "overloaded",
+                                  "504", "DEADLINE_EXCEEDED",
                                   "timed out", "Timeout", "timeout"))
 
 
@@ -139,7 +140,10 @@ def ask(question: str, client=None, verbose=True) -> dict:
             # (We never switch mid-conversation: a model may not accept another model's turns.)
             for i, candidate in enumerate([MODEL] + FALLBACK_MODELS):
                 try:
-                    response = _generate(client, candidate, contents, config)
+                    if verbose:
+                        print(f"  ... thinking ({candidate})", flush=True)
+                    # one quick retry on the main model, then move on to a less busy one
+                    response = _generate(client, candidate, contents, config, retries=1 if i == 0 else 2)
                     model = candidate
                     break
                 except Exception as e:
