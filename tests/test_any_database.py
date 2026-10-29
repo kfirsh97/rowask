@@ -62,7 +62,7 @@ def test_missing_sqlite_file_is_a_clear_setup_error(monkeypatch):
 
 def test_profiles(monkeypatch):
     assert dbprofile.load_profile("generic")["notes"] == ""
-    with pytest.raises(FileNotFoundError, match="Available: chinook, porsche, generic"):
+    with pytest.raises(FileNotFoundError, match="Available: chinook, porsche, superstore, generic"):
         dbprofile.load_profile("shop")
     bad = DATA.parent / "profiles" / "_bad_test.toml"
     bad.write_text('titel = "typo"\n', encoding="utf-8")

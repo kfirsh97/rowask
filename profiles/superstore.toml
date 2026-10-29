@@ -1,0 +1,33 @@
+# Superstore: order lines of an office-supplies, furniture and technology retailer in the US and Canada,
+# 2023-2026, one row per product in an order.
+# Build the database from the CSV first:   python setup/csv_to_sqlite.py data/superstore.csv
+
+title = "Superstore Sales Agent"
+description = """Chat with the Superstore sales data in Hebrew or English: orders, customers, products, regions,
+discounts and profit. The agent writes the SQL, checks its own result,
+and shows the query behind every answer."""
+business = "a retailer of office supplies, furniture and technology in the US and Canada"
+database_url = "sqlite:///data/superstore.sqlite"
+
+examples = [
+    "מה הרווח לפי קטגוריה בכל שנה?",
+    "Which 5 sub-categories lose the most money?",
+    "איך ההנחה משפיעה על הרווח?",
+    "מי עשרת הלקוחות הכי רווחיים?",
+]
+
+notes = """
+- One table, superstore: ONE ROW PER PRODUCT IN AN ORDER (an order line). An order with 3 products has 3 rows.
+  Count orders with COUNT(DISTINCT Order_ID), customers with COUNT(DISTINCT Customer_ID) - never COUNT(*).
+- Sales: revenue of the line in US dollars, after discount. Profit: profit of the line in US dollars - often
+  negative (a loss). Profit margin = SUM(Profit) / SUM(Sales).
+- Discount: a fraction, 0 to 0.8 (0.2 = 20% off). Quantity: units of the product in the line.
+- Order_Date / Ship_Date: 'YYYY-MM-DD' text. Data covers 2023-01-03 to 2026-12-30.
+  Days to ship = julianday(Ship_Date) - julianday(Order_Date).
+- Category: 'Office Supplies', 'Furniture', 'Technology'; Sub_Category: 17 values (e.g. 'Tables', 'Binders', 'Phones').
+- Segment: 'Consumer', 'Corporate', 'Home Office'. Ship_Mode: 'Standard Class', 'Second Class', 'First Class', 'Same Day'.
+- Country_Region: 'United States' or 'Canada' (200 rows). State_Province holds US states and Canadian provinces.
+  Region: 'West', 'East', 'Central', 'South'.
+- Product_ID is not unique to one product name (a few IDs carry 2 names) - group by Product_Name for product questions.
+- Postal_Code is text; some US ZIP codes lost their leading zero in the source (4 digits instead of 5).
+"""

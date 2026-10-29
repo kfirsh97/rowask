@@ -86,7 +86,7 @@ pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
 python check_setup.py          # DB connection, read-only check, API key check
 python -m streamlit run app.py # web chat on http://localhost:8501
-python -m pytest tests         # 65 tests (3 need a PostgreSQL server), no API key needed
+python -m pytest tests         # 68 tests (3 need a PostgreSQL server), no API key needed
 ```
 
 ## Files
@@ -100,7 +100,7 @@ python -m pytest tests         # 65 tests (3 need a PostgreSQL server), no API k
 | `db.py` | Connects to any database (SQLAlchemy); read-only sessions, 30-second query limit, dialect hints for the model |
 | `dbprofile.py` · `profiles/` | Per-database knowledge: business line, notes, example questions |
 | `data/` | SQLite copies: Porsche (built by `setup/build_sqlite.py`) and the Chinook sample database |
-| `check_setup.py` · `setup/` · `SETUP.md` | Setup check, read-only user, SQLite builder, setup guide |
+| `check_setup.py` · `setup/` · `SETUP.md` | Setup check, read-only user, SQLite builder, CSV importer, setup guide |
 | `tests/` | Safety, agent loop (with a fake model), real-database tests on SQLite and PostgreSQL, comparison and evaluation |
 
 ## Web interface

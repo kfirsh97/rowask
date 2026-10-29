@@ -195,6 +195,20 @@ tells it what they mean – on the Porsche database, these notes took accuracy f
 - `examples` – four questions shown as buttons on the chat page
 - `title` and `description` – the chat page header
 
+### From CSV or Excel files
+
+No database at all, just a spreadsheet? Save it as CSV (Excel: File → Save As → CSV UTF-8) and turn it into a
+SQLite database – one table per file, column types detected from the data, codes with leading zeros kept as text:
+
+```bash
+python setup/csv_to_sqlite.py data/superstore.csv                    # -> data/superstore.sqlite
+python setup/csv_to_sqlite.py orders.csv customers.csv --out data/shop.sqlite
+```
+
+Then in `.env`: `DATABASE_URL=sqlite:///data/shop.sqlite` and `DB_PROFILE=generic` (or your own profile).
+`profiles/superstore.toml` is a ready-made profile for the public Superstore sample sales data: put
+`superstore.csv` in `data/`, run the first command above, and set `DB_PROFILE=superstore` (with no `DATABASE_URL`).
+
 Good to know: with more than 40 tables, the agent first sees just the table names and then asks for the
 columns of the tables it needs. On PostgreSQL it reads the `public` schema. The 12-question answer key
 (`eval.py`) is written for the Porsche database on SQL Server – for your own database, write your own questions
