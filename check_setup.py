@@ -1,45 +1,44 @@
-"""Stage 1 check: can we reach the database, is the user really read-only, and is the API key set?
+"""Setup check: which database, can we reach it, is the connection really read-only, and are the API keys good?
 
 Run:  python check_setup.py
 """
 import os
+import sys
 
-from db import connect
+from sqlalchemy import func, inspect, select, table
+
+import db
+from dbprofile import load_profile
 
 
 def main():
-    conn = connect()
-    cur = conn.cursor()
+    try:
+        print(f"Profile: {load_profile()['name']}  |  Database: {db.describe()}")
+        conn = db.connect()
+    except (db.SetupError, FileNotFoundError, ValueError) as e:
+        sys.exit(f"Setup problem: {e}")
 
     # 1. Row count per table - proves the connection works and the data is loaded.
-    cur.execute("""
-        SELECT t.name AS table_name, SUM(p.rows) AS row_count
-        FROM sys.tables t
-        JOIN sys.partitions p ON p.object_id = t.object_id AND p.index_id IN (0, 1)
-        GROUP BY t.name
-        ORDER BY row_count DESC
-    """)
-    rows = cur.fetchall()
-    print(f"Connected. {len(rows)} tables:")
-    for r in rows:
-        print(f"  {r['table_name']:<28} {r['row_count']:>7,}")
-
-    # 2. The agent's user must NOT be able to write.
-    try:
-        cur.execute("CREATE TABLE _write_test (x INT)")
-        conn.commit()
-        print("\nWARNING: the user can write to the database! Use the read-only user.")
-        cur.execute("DROP TABLE _write_test")
-        conn.commit()
-    except Exception:
-        print("\nGood: the user is read-only (write was blocked).")
-
+    names = inspect(conn).get_table_names()
+    print(f"Connected. {len(names)} tables:")
+    for name in names[:60]:
+        n = conn.execute(select(func.count()).select_from(table(name))).scalar()
+        print(f"  {name:<28} {n:>9,}")
+    if len(names) > 60:
+        print(f"  ... and {len(names) - 60} more")
     conn.close()
+
+    # 2. The agent's connection must NOT be able to write (straight to the database, past the agent's own checks).
+    try:
+        db.fetch("CREATE TABLE _write_test (x INT)", 1)
+        print("\nWARNING: this connection can write to the database! Connect with a read-only user (see SETUP.md).")
+        with db.engine().begin() as c:                  # some databases commit table creation at once
+            c.exec_driver_sql("DROP TABLE _write_test")
+    except Exception:
+        print("\nGood: the connection is read-only (a write was blocked).")
 
     check_gemini()
     check_claude()
-
-
 def check_gemini():
     # Gemini key: present, not the placeholder, and accepted by Google.
     # We never print a key - only its length and first 4 characters, to spot paste mistakes.

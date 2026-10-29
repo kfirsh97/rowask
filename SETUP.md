@@ -1,5 +1,37 @@
 # Setup guide – from zero to chatting with the database
 
+Three ways to run it, from fastest to fullest:
+
+| | Database | Needs | Time |
+|---|---|---|---|
+| **[Quick start](#quick-start-no-database-server)** | SQLite copy of the Porsche database, in this repo | Python + an API key | 3 minutes |
+| **[Full setup](#full-setup-sql-server)** | The original SQL Server database, in Docker | + Docker | 15 minutes |
+| **[Your own database](#your-own-database)** | PostgreSQL, SQL Server, SQLite, MySQL… | + its address and a read-only user | 5 minutes |
+
+## Quick start (no database server)
+
+`data/porsche.sqlite` is a complete copy of the Porsche database in one file, so nothing else is needed:
+
+```bash
+cd agent
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+In `.env`, add your API key (see [step 4](#4-add-your-keys)) and **delete the five `DB_...` lines** – with no
+database settings, the agent uses the SQLite copy. Then:
+
+```bash
+python check_setup.py              # should list 18 tables and say the connection is read-only
+python -m streamlit run app.py
+```
+
+Want to see it on a database it was never built for? Set `DB_PROFILE=chinook` in `.env` and restart:
+a public music-store sample database (also in `data/`).
+
+## Full setup (SQL Server)
+
 This walks through everything on a Mac (Intel or Apple Silicon). Windows and Linux work the same way;
 only the Docker install differs. Plan on about 15 minutes.
 
@@ -123,6 +155,51 @@ python -m pytest tests     # no database or API key needed
 python eval.py             # scores the agent on 12 questions with known answers
 ```
 
+## Your own database
+
+The agent reads the structure of whatever database it is connected to, so it works on any database
+[SQLAlchemy](https://docs.sqlalchemy.org/en/20/core/engines.html) can reach. Two lines in `.env`:
+
+```ini
+DB_PROFILE=generic
+DATABASE_URL=postgresql://agent_reader:password@db.example.com:5432/shop
+```
+
+| Database | `DATABASE_URL` | Driver |
+|---|---|---|
+| PostgreSQL | `postgresql://user:password@host:5432/dbname` | included |
+| SQL Server | `mssql://user:password@host:1433/dbname` | included |
+| SQLite | `sqlite:///path/to/file.db` (relative to `agent/`, or absolute) | built in |
+| MySQL / MariaDB | `mysql://user:password@host:3306/dbname` | `pip install pymysql` |
+
+Special characters in the password must be URL-encoded (`!` → `%21`, `@` → `%40`, `#` → `%23`).
+
+**Use a read-only user.** The agent only lets single SELECT queries through, SQLite files are opened read-only
+and PostgreSQL sessions start read-only – but a user that cannot write is the layer that does not depend on
+this code. `python check_setup.py` tries a write and tells you if it got through. For PostgreSQL:
+
+```sql
+CREATE ROLE agent_reader LOGIN PASSWORD 'choose-one';
+GRANT CONNECT ON DATABASE shop TO agent_reader;
+GRANT USAGE ON SCHEMA public TO agent_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO agent_reader;
+```
+
+**Make it accurate with a profile.** `generic` works, but the agent only sees table and column names. A profile
+tells it what they mean – on the Porsche database, these notes took accuracy from 11/12 to 12/12. Copy
+`profiles/chinook.toml` to `profiles/<name>.toml`, set `DB_PROFILE=<name>`, and fill in:
+
+- `business` – one line: what the business is ("an online furniture store")
+- `notes` – currency and units, how values are coded (`status = 3` means cancelled), which date is which,
+  how to compute common metrics
+- `examples` – four questions shown as buttons on the chat page
+- `title` and `description` – the chat page header
+
+Good to know: with more than 40 tables, the agent first sees just the table names and then asks for the
+columns of the tables it needs. On PostgreSQL it reads the `public` schema. The 12-question answer key
+(`eval.py`) is written for the Porsche database on SQL Server – for your own database, write your own questions
+and expected queries to measure it.
+
 ## Troubleshooting
 
 | You see | What to do |
@@ -134,3 +211,7 @@ python eval.py             # scores the agent on 12 questions with known answers
 | `The Anthropic account has no API credit` | API usage is billed separately from a Claude.ai subscription. Add credit, or switch to Gemini in the sidebar. |
 | `port is already allocated` on `docker run` | Something already uses port 1433 – often an older `sqlserver` container: `docker start sqlserver` instead. |
 | Gemini is slow or `503 / overloaded` | Free-tier models get busy. The agent retries and switches models by itself; give it a moment. |
+| `No profile '...'` | `DB_PROFILE` in `.env` names a file that isn't in `profiles/`. Use `porsche`, `chinook`, `generic`, or add your own. |
+| `SQLite file not found` | The path in `DATABASE_URL` is relative to the `agent` folder. For the Porsche copy: `python setup/build_sqlite.py` rebuilds it. |
+| `The driver for mysql is not installed` | `pip install pymysql` |
+| `Query stopped after 30 seconds` | The model gets this back and writes a cheaper query. Very large tables may need indexes or a summary view. |

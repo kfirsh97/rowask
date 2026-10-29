@@ -1,45 +1,37 @@
 """The agent's two tools: read the database structure, and run a read-only query.
 
-Safety has two layers:
-  1. The database user can only read (see setup/01_create_reader.sql).
-  2. Before any query reaches the database, validate_query() rejects anything
+Works on any database SQLAlchemy can reach (see db.py). Safety has layers:
+  1. Before any query reaches the database, validate_query() rejects anything
      that is not a single SELECT statement.
+  2. The connection itself is read-only: a read-only database user (setup/01_create_reader.sql),
+     SQLite files opened read-only, PostgreSQL sessions that start read-only.
+  3. Every query is stopped after 30 seconds.
 """
 import datetime
 import decimal
 import os
 import re
+import sqlite3
 
-from db import connect
+from sqlalchemy import inspect
+
+import db
+from dbprofile import load_profile
 
 MAX_ROWS = 50          # rows sent back to the model; enough to answer, small enough to stay cheap
+LARGE_SCHEMA = 40      # above this many tables, get_schema lists tables first and the model asks for details
 FORBIDDEN = [
     "insert", "update", "delete", "merge", "drop", "alter", "create", "truncate",
     "exec", "execute", "grant", "revoke", "deny", "backup", "restore", "shutdown",
-    "into",            # blocks SELECT ... INTO, which creates a table
-    "openrowset", "opendatasource", "xp_", "sp_",
+    "into",            # blocks SELECT ... INTO, which creates a table (and MySQL's INTO OUTFILE)
+    "openrowset", "opendatasource", "xp_", "sp_",                        # SQL Server
+    "attach", "detach", "pragma", "vacuum",                              # SQLite
+    "copy", "call", "dblink", "lo_import", "lo_export",                  # PostgreSQL
+    "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_sleep",
+    "load_file",                                                         # MySQL
 ]
 
 _schema_cache = {}
-
-# Business meaning of columns that the raw schema cannot tell the model.
-# Stage 5 measures how much these notes improve accuracy (SCHEMA_NOTES=off turns them off).
-SCHEMA_NOTES = """COLUMN NOTES (business meaning):
-- Sales.Sold_Price: final sale price of the car, in US dollars. Sales.Sold_Date: date of the sale.
-- Sales.Views / Followers / Comments: engagement counts on the car's sale listing.
-- Sellers.Dealer_Or_PrivateParty: 'Dealer' or 'Private Party'. Dealer details are in Dealer_Sellers,
-  private sellers in Private_Seller (both share Seller_ID with Sellers).
-- DealersWithInsurances: which insurance companies (Insurance.InsuranceID) each dealer works with.
-- CARS.YEAR: the car's model year. CARS.Title: listing title, includes the model name (e.g. 'Turbo', 'Carrera').
-- CARS.Mileage: odometer reading in miles.
-- CARS.OWNERS: free text. 'CARFAX 1-Owner vehicle' = one owner; 'NPrevious owners' (no space, e.g. '3Previous owners')
-  = N previous owners; 'Types of owners: ...' lists owner types.
-- Policy.Insurance_Type: 'Mandatory', 'Comprehensive' or 'Third Party'.
-- Services.Service_Cost: cost of one service visit in US dollars (0-3000).
-- Payments.Amount: payment amount in US dollars. Payments.Seller_Commission: the seller's commission in US dollars.
-- ZipCodes.State: full US state name in English (e.g. 'California', 'New York').
-- Customers.FOLLOW / COMMENTS: how many listings the customer follows / comments they wrote.
-- Ages: a car's age in years = YEAR(GETDATE()) - CARS.YEAR."""
 
 
 # ---------------------------------------------------------------- safety
@@ -77,51 +69,85 @@ def notes_enabled() -> bool:
     return os.environ.get("SCHEMA_NOTES", "on").lower() not in ("off", "0", "false", "no")
 
 
-def get_schema() -> str:
-    """Describe every table: its columns with types, how the tables are linked,
-    and (unless SCHEMA_NOTES=off) the business meaning of key columns."""
+def _type(t) -> str:
+    try:
+        text = str(t)
+    except Exception:                    # some database-specific types cannot be printed generically
+        text = t.__class__.__name__
+    return text.split(" COLLATE")[0].lower()
+
+
+def _describe(insp, name):
+    cols = ", ".join(f"{c['name']} {_type(c['type'])}" for c in insp.get_columns(name))
+    return f"- {name}({cols})"
+
+
+def get_schema(tables=None) -> str:
+    """Describe the database: tables (and views) with their columns and types, how they are linked,
+    and (unless SCHEMA_NOTES=off) the business notes from the profile.
+    On a large database, the first call lists the tables only; call again with `tables` for their columns."""
     notes = notes_enabled()
-    if notes in _schema_cache:
-        return _schema_cache[notes]
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
-        FROM INFORMATION_SCHEMA.COLUMNS
-        ORDER BY TABLE_NAME, ORDINAL_POSITION
-    """)
-    tables = {}
-    for r in cur.fetchall():
-        tables.setdefault(r["TABLE_NAME"], []).append(f"{r['COLUMN_NAME']} {r['DATA_TYPE']}")
+    key = (db.database_url(), notes, tuple(sorted(t.lower() for t in tables)) if tables else None)
+    if key in _schema_cache:
+        return _schema_cache[key]
+    insp = inspect(db.engine())
+    names = insp.get_table_names()
+    views = insp.get_view_names()
+    by_lower = {n.lower(): n for n in names + views}
 
-    cur.execute("""
-        SELECT tp.name AS from_table, cp.name AS from_col,
-               tr.name AS to_table,   cr.name AS to_col
-        FROM sys.foreign_key_columns fk
-        JOIN sys.tables  tp ON tp.object_id = fk.parent_object_id
-        JOIN sys.columns cp ON cp.object_id = fk.parent_object_id     AND cp.column_id = fk.parent_column_id
-        JOIN sys.tables  tr ON tr.object_id = fk.referenced_object_id
-        JOIN sys.columns cr ON cr.object_id = fk.referenced_object_id AND cr.column_id = fk.referenced_column_id
-        ORDER BY tp.name
-    """)
-    links = [f"{r['from_table']}.{r['from_col']} -> {r['to_table']}.{r['to_col']}" for r in cur.fetchall()]
-    conn.close()
+    if tables:
+        wanted = [by_lower[t.lower()] for t in tables if t.lower() in by_lower]
+        missing = [t for t in tables if t.lower() not in by_lower]
+        lines = ["TABLES:"] + [_describe(insp, n) for n in wanted]
+        if missing:
+            lines += ["", f"NOT FOUND: {', '.join(missing)}"]
+        links = _links(insp, wanted)
+    elif len(names) + len(views) > LARGE_SCHEMA:
+        lines = [f"LARGE DATABASE: {len(names)} tables, {len(views)} views. Columns are not listed here - "
+                 "call get_schema again with the names of the tables you need.", "", "TABLES:"]
+        lines += [f"- {n} ({len(insp.get_columns(n))} columns)" for n in names]
+        if views:
+            lines += ["", "VIEWS:"] + [f"- {v}" for v in views]
+        links = _links(insp, names)
+    else:
+        lines = ["TABLES:"] + [_describe(insp, n) for n in names]
+        if views:
+            lines += ["", "VIEWS:"] + [_describe(insp, v) for v in views]
+        links = _links(insp, names)
 
-    lines = ["TABLES:"]
-    lines += [f"- {t}({', '.join(cols)})" for t, cols in tables.items()]
     lines += ["", "FOREIGN KEYS:"] + [f"- {l}" for l in links]
-    if notes:
-        lines += ["", SCHEMA_NOTES]
-    _schema_cache[notes] = "\n".join(lines)
-    return _schema_cache[notes]
+    profile_notes = load_profile()["notes"].strip()
+    if notes and profile_notes:
+        lines += ["", "COLUMN NOTES (business meaning):", profile_notes]
+    _schema_cache[key] = "\n".join(lines)
+    return _schema_cache[key]
+
+
+def _links(insp, names):
+    links = []
+    for t in names:
+        for fk in insp.get_foreign_keys(t):
+            for a, b in zip(fk["constrained_columns"], fk["referred_columns"]):
+                links.append(f"{t}.{a} -> {fk['referred_table']}.{b}")
+    return links
 
 
 def _jsonable(v):
     if isinstance(v, decimal.Decimal):
         return float(v)
-    if isinstance(v, (datetime.date, datetime.datetime)):
+    if isinstance(v, (datetime.date, datetime.datetime, datetime.time)):
         return v.isoformat()
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return f"<{len(bytes(v))} bytes>"
     return v
+
+
+def _clean_error(e: Exception) -> str:
+    if isinstance(e, sqlite3.OperationalError) and str(e) == "interrupted":
+        return f"Query stopped after {db.QUERY_TIMEOUT_S} seconds - make it cheaper (filter earlier, aggregate, or LIMIT)."
+    msg = str(getattr(e, "orig", None) or e)
+    msg = msg.split("DB-Lib error")[0] if "DB-Lib error" in msg else msg
+    return msg.strip()[:500]
 
 
 def run_query_all(sql: str, max_rows: int = 100_000):
@@ -129,14 +155,7 @@ def run_query_all(sql: str, max_rows: int = 100_000):
     reason = validate_query(sql)
     if reason:
         raise ValueError(f"Query rejected: {reason}")
-    conn = connect()
-    try:
-        cur = conn.cursor(as_dict=False)
-        cur.execute(sql)
-        rows = cur.fetchmany(max_rows)
-        cols = [d[0] for d in cur.description] if cur.description else []
-    finally:
-        conn.close()
+    cols, rows = db.fetch(sql, max_rows)
     return cols, [tuple(_jsonable(v) for v in r) for r in rows]
 
 
@@ -146,20 +165,11 @@ def run_query(sql: str) -> dict:
     if reason:
         return {"error": f"Query rejected: {reason}"}
     try:
-        conn = connect()
-        cur = conn.cursor()
-        cur.execute(sql)
-        rows = cur.fetchmany(MAX_ROWS + 1)
-        conn.close()
-    except Exception as e:  # SQL errors go back to the agent so it can fix its query
-        msg = str(e)
-        msg = msg.split("DB-Lib error")[0] if "DB-Lib error" in msg else msg
-        return {"error": msg[:500]}
+        cols, rows = db.fetch(sql, MAX_ROWS + 1)
+    except db.SetupError:
+        raise                         # a setup problem is for the user, not for the model to retry
+    except Exception as e:            # SQL errors go back to the agent so it can fix its query
+        return {"error": _clean_error(e)}
     truncated = len(rows) > MAX_ROWS
-    rows = [{k: _jsonable(v) for k, v in r.items()} for r in rows[:MAX_ROWS]]
-    return {
-        "columns": list(rows[0].keys()) if rows else [],
-        "rows": rows,
-        "row_count": len(rows),
-        "truncated": truncated,
-    }
+    rows = [{c: _jsonable(v) for c, v in zip(cols, r)} for r in rows[:MAX_ROWS]]
+    return {"columns": cols, "rows": rows, "row_count": len(rows), "truncated": truncated}

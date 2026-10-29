@@ -34,7 +34,7 @@ def test_fixes_its_own_error(monkeypatch, tmp_path):
         {"columns": ["n"], "rows": [{"n": 4554}], "row_count": 1, "truncated": False},
     ])
     monkeypatch.setattr(agent, "run_query", lambda sql: next(results))
-    monkeypatch.setattr(agent, "get_schema", lambda: "TABLES: Sales(...)")
+    monkeypatch.setattr(agent, "get_schema", lambda tables=None: "TABLES: Sales(...)")
 
     client = fake_client([
         ([("get_schema", {})], None),
@@ -54,7 +54,7 @@ def test_fixes_its_own_error(monkeypatch, tmp_path):
 def test_stops_after_max_steps(monkeypatch, tmp_path):
     """A model that never stops calling tools is cut off - no infinite loop."""
     monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
-    monkeypatch.setattr(agent, "get_schema", lambda: "TABLES")
+    monkeypatch.setattr(agent, "get_schema", lambda tables=None: "TABLES")
     client = fake_client([([("get_schema", {})], None)] * (agent.MAX_STEPS + 5))
     r = agent.ask("loop forever", client=client, verbose=False)
     assert "Stopped after" in r["answer"]
@@ -135,7 +135,7 @@ def test_final_sql_is_the_query_shown_in_the_answer(monkeypatch, tmp_path):
 
 def test_on_step_reports_each_step_live(monkeypatch, tmp_path):
     monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
-    monkeypatch.setattr(agent, "get_schema", lambda: "TABLES")
+    monkeypatch.setattr(agent, "get_schema", lambda tables=None: "TABLES")
     seen = []
     client = fake_client([([("get_schema", {})], None), ([], "done")])
     agent.ask("q", client=client, verbose=False, on_step=seen.append)

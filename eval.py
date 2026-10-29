@@ -37,6 +37,12 @@ def main():
     args = ap.parse_args()
 
     os.environ["SCHEMA_NOTES"] = args.notes        # read by tools.get_schema() on every call
+    import db
+    from dbprofile import load_profile
+    if not load_profile()["answer_key"] or db.dialect() != "mssql":
+        raise SystemExit("The answer key (eval_questions.py) is written in T-SQL for the Porsche database on "
+                         f"SQL Server; the agent is now on {db.describe()} with profile '{load_profile()['name']}'. "
+                         "Run the evaluation with the SQL Server settings from SETUP.md.")
     import agent
     from agent import _is_temporary
     if args.model:

@@ -1,0 +1,26 @@
+# Chinook: a public sample database of a digital music store (artists, albums, tracks, customers,
+# invoices). Included to show the agent works on a database it was never built for.
+# Source and MIT license: https://github.com/lerocha/chinook-database (see data/README.md).
+
+title = "Music Store SQL Agent"
+description = """Chat with the Chinook music-store database in Hebrew or English: artists, albums, tracks,
+customers and their purchases. The agent writes the SQL, checks its own result,
+and shows the query behind every answer."""
+business = "a digital music store that sells individual tracks"
+database_url = "sqlite:///data/chinook.sqlite"
+
+examples = [
+    "מי חמשת האמנים עם הכי הרבה מכירות?",
+    "Which country brings in the most revenue?",
+    "איזה ז'אנר הכי פופולרי?",
+    "How did total sales change from year to year?",
+]
+
+notes = """
+- Invoice.Total: the invoice total in US dollars. InvoiceLine.UnitPrice x Quantity: revenue of one line.
+- A "sale" of a track = one InvoiceLine row. Revenue by artist/genre/album goes InvoiceLine -> Track -> Album -> Artist
+  (or Track -> Genre).
+- Invoice.InvoiceDate: when the purchase was made. Customer.Country / Invoice.BillingCountry: where the customer is.
+- Customer.SupportRepId -> Employee.EmployeeId: the sales support agent responsible for that customer.
+- Track.Milliseconds: track length (divide by 60000 for minutes). Track.Bytes: file size.
+"""

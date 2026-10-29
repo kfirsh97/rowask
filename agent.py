@@ -1,4 +1,5 @@
-"""The SQL agent: answers business questions about the Porsche database.
+"""The SQL agent: answers business questions about a database - the Porsche sales database by default,
+or any other one you point it at (see db.py and profiles/).
 
 How it works (the "agent loop"):
   1. The model gets the question plus two tools: get_schema and run_query.
@@ -36,12 +37,13 @@ MAX_STEPS = 8
 REQUEST_TIMEOUT_MS = 90_000      # give up on a single model call after 90 seconds
 LOG_DIR = Path(__file__).parent / "logs"
 
-SYSTEM_PROMPT = """You are a careful data analyst for a Porsche car-sales business.
-The data lives in a Microsoft SQL Server database (T-SQL dialect).
+SYSTEM_PROMPT = """You are a careful data analyst for {business}.
+The data lives in this database: {dialect_hint}
 
 How to work:
 - Call get_schema first to see the tables, columns and foreign keys. Never guess a column name.
-- Write T-SQL: use TOP, not LIMIT; use YEAR(date_column) for years.
+  On a large database it lists the tables only - call it again with the tables you need to see their columns.
+- Write SQL for this database's dialect (see above).
 - Call run_query to run your query. If you get an error, read it, fix the query and try again.
 - Check that the result makes sense before answering (empty result? impossible numbers?
   duplicated rows from a bad JOIN?). If it looks wrong, investigate with another query.
@@ -62,20 +64,34 @@ Final answer:
 - If you ran a query for this message, show the final SQL query you used after the answer,
   in a ```sql code block. Do not add a SQL block for a query you did not run in this turn."""
 
+
+
+def system_prompt() -> str:
+    """The prompt for the active database: its business line (from the profile) and its SQL dialect."""
+    import db
+    from dbprofile import load_profile
+    return SYSTEM_PROMPT.format(business=load_profile()["business"], dialect_hint=db.dialect_hint())
+
+
 HISTORY_TURNS = 6   # how many earlier question/answer pairs the model sees (keeps requests small)
 
 TOOLS = types.Tool(function_declarations=[
     types.FunctionDeclaration(
         name="get_schema",
-        description="Returns all tables with their columns and data types, and the foreign keys between tables.",
-        parameters_json_schema={"type": "object", "properties": {}},
+        description="Returns the tables with their columns and data types, the foreign keys between tables, "
+                    "and business notes. On a large database it lists the tables only; pass `tables` to get "
+                    "the columns of specific tables.",
+        parameters_json_schema={"type": "object", "properties": {
+            "tables": {"type": "array", "items": {"type": "string"},
+                       "description": "Optional: only describe these tables."}}},
     ),
     types.FunctionDeclaration(
         name="run_query",
-        description="Runs ONE read-only T-SQL SELECT query and returns up to 50 rows, or an error message.",
+        description="Runs ONE read-only SELECT query (in this database's SQL dialect) and returns up to 50 rows, "
+                    "or an error message.",
         parameters_json_schema={
             "type": "object",
-            "properties": {"sql": {"type": "string", "description": "A single T-SQL SELECT query."}},
+            "properties": {"sql": {"type": "string", "description": "A single SELECT query."}},
             "required": ["sql"],
         },
     ),
@@ -85,7 +101,8 @@ TOOLS = types.Tool(function_declarations=[
 def call_tool(name: str, args: dict) -> dict:
     """Run the tool the model asked for. Unknown tools return an error instead of crashing."""
     if name == "get_schema":
-        return {"schema": get_schema()}
+        tables = args.get("tables")
+        return {"schema": get_schema(tables if isinstance(tables, list) and tables else None)}
     if name == "run_query":
         return run_query(args.get("sql", ""))
     return {"error": f"Unknown tool: {name}"}
@@ -147,7 +164,7 @@ def _run_gemini(question, client, verbose, on_step=None, history=None):
     """Agent loop on Gemini. Returns (answer, steps, last_sql, model_used)."""
     client = client or make_client()
     config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT,
+        system_instruction=system_prompt(),
         tools=[TOOLS],
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),  # we run the loop ourselves
         # temperature left at the model default: newer Gemini models are tuned for it
@@ -234,11 +251,12 @@ def _run_claude(question, client, verbose, on_step=None, history=None):
         messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
     messages.append({"role": "user", "content": question})
     steps, last_sql, answer = [], None, None
+    system = system_prompt()
     for step in range(1, MAX_STEPS + 1):
         if verbose:
             print(f"  ... thinking ({CLAUDE_MODEL})", flush=True)
         response = client.messages.create(
-            model=CLAUDE_MODEL, max_tokens=2048, system=SYSTEM_PROMPT,
+            model=CLAUDE_MODEL, max_tokens=2048, system=system,
             tools=CLAUDE_TOOLS, messages=messages,
         )
         calls = [b for b in response.content if b.type == "tool_use"]

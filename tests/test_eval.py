@@ -7,6 +7,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import agent  # noqa: E402
 import eval as evaluation  # noqa: E402
 import tools  # noqa: E402
+import db as database  # noqa: E402
+import dbprofile  # noqa: E402
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def on_sql_server(monkeypatch):
+    """The answer key is T-SQL, so eval runs only on SQL Server. These tests fake the database itself;
+    the settings just make the agent believe it is on SQL Server (no connection is opened)."""
+    for k in ("DATABASE_URL", "DB_PROFILE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("DB_USER", "agent_reader")
+    monkeypatch.setenv("DB_PASSWORD", "x")
+    database._engine_for.cache_clear()
+    dbprofile.load_profile.cache_clear()
+    yield
+    database._engine_for.cache_clear()
+
+
+def test_refuses_to_score_on_a_database_the_answer_key_is_not_for(monkeypatch):
+    monkeypatch.delenv("DB_USER")                       # -> the SQLite copy of Porsche
+    monkeypatch.setattr(sys, "argv", ["eval.py"])
+    with pytest.raises(SystemExit, match="SQL Server"):
+        evaluation.main()
 
 
 def test_scores_pass_and_fail(monkeypatch, tmp_path):

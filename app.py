@@ -1,7 +1,8 @@
 """Web interface for the SQL agent.
 
-Run:   streamlit run app.py
-Demo:  DEMO=1 streamlit run app.py     (replays two recorded runs - no database or API key needed)
+Run:   python -m streamlit run app.py
+Demo:  DEMO=1 python -m streamlit run app.py     (replays two recorded runs - no database or API key needed)
+Title, description and example questions come from the active profile (DB_PROFILE, see profiles/).
 """
 import glob
 import json
@@ -11,17 +12,24 @@ from pathlib import Path
 
 import streamlit as st
 
+import db
+from dbprofile import load_profile
+
 HERE = Path(__file__).parent
+
+
+def esc(text):
+    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 DEMO = os.environ.get("DEMO", "").lower() in ("1", "true", "yes")
 
-EXAMPLES = [
-    "כמה מכירות היו בכל שנה?",
-    "מי שלושת המוכרים עם סך המכירות הגבוה ביותר?",
-    "Which 5 car models sold for the highest average price?",
-    "באיזו מדינה יש הכי הרבה לקוחות?",
-]
+try:
+    PROFILE = load_profile("porsche" if DEMO else None)      # the recorded demo runs are on Porsche
+    PROFILE_ERROR = None
+except Exception as e:                                        # bad DB_PROFILE: still show the page, with the reason
+    PROFILE, PROFILE_ERROR = load_profile("generic"), str(e)
+EXAMPLES = PROFILE["examples"]
 
-st.set_page_config(page_title="Porsche SQL Agent", page_icon="🏁", layout="centered")
+st.set_page_config(page_title=PROFILE["title"], page_icon="🏁", layout="centered")
 
 # ------------------------------------------------------------------ look
 # Palette taken from period Porsche paint: Chalk (ground), Slate Grey (ink), Oak Green Metallic (accent),
@@ -79,15 +87,15 @@ st.html("""
 </style>
 """)
 
-st.html("""
+st.html(f"""
 <div class="brand">
-<h1>Porsche SQL Agent</h1>
+<h1>{esc(PROFILE["title"])}</h1>
 <div class="redline" aria-hidden="true"></div>
-<p>Chat with the Porsche sales database in Hebrew or English. Ask a business question, then keep
-going with follow-ups like "and in 2023?". The agent writes the SQL, checks its own result,
-and shows the query behind every answer.</p>
+<p>{esc(PROFILE["description"])}</p>
 </div>
 """)
+if PROFILE_ERROR:
+    st.error(PROFILE_ERROR)
 
 
 # ------------------------------------------------------------------ sidebar
@@ -109,14 +117,21 @@ with st.sidebar:
                         label_visibility="collapsed", disabled=DEMO, key="provider")
     notes = st.toggle("Business notes in the schema", value=True, disabled=DEMO, key="notes",
                       help="Currency, units and value formats the raw schema cannot tell the model.")
-    st.markdown("#### Answer key")
-    score = latest_score() or ("12/12", 10.0, ["claude-sonnet-5-5"])
-    st.html(f'<div class="score"><b>{score[0]}</b><span>questions correct</span></div>')
-    st.caption("Scored against 12 business questions with known answers, by running the agent's SQL "
-               "and comparing the full result.")
+    st.markdown("#### Database")
+    try:
+        st.caption("Recorded runs - no database connected" if DEMO
+                   else f"{db.describe()} · profile: {PROFILE['name']}")
+    except Exception as e:
+        st.caption(f"Not connected: {e}")
+    if PROFILE["answer_key"]:
+        st.markdown("#### Answer key")
+        score = latest_score() or ("12/12", 10.0, ["claude-sonnet-5-5"])
+        st.html(f'<div class="score"><b>{score[0]}</b><span>questions correct</span></div>')
+        st.caption("Scored against 12 business questions with known answers, by running the agent's SQL "
+                   "on SQL Server and comparing the full result.")
     st.markdown("#### Safety")
-    st.caption("Read-only database user. Only single SELECT queries reach the database. "
-               "At most 8 steps per question.")
+    st.caption("Read-only connection. Only single SELECT queries reach the database, each stopped after "
+               "30 seconds. At most 8 steps per question.")
     st.markdown("#### Conversation")
     turns = len(st.session_state.get("history", []))
     st.caption(f"The agent sees the last {min(turns, 6)} of {turns} earlier turns, so follow-up questions work."
@@ -129,8 +144,6 @@ with st.sidebar:
 
 
 # ------------------------------------------------------------------ rendering
-def esc(text):
-    return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
 def step_html(i, step):
@@ -230,10 +243,10 @@ for item in st.session_state.history:
         show_result(item["run"])
 
 picked = None
-if not st.session_state.history:          # examples only start a chat; after that, the user just keeps talking
+if EXAMPLES and not st.session_state.history:   # examples only start a chat; after that, the user just keeps talking
     picked = st.pills("Try a question", EXAMPLES, key=f"pick{st.session_state.get('chat_id', 0)}")
 typed = st.chat_input("Ask a follow-up, or a new question" if st.session_state.history
-                      else "Ask about sales, sellers, cars or insurance, in Hebrew or English")
+                      else "Ask a question about the data, in Hebrew or English")
 question = typed or picked
 
 if question:
@@ -253,6 +266,10 @@ if question:
                     msg = "The Anthropic account has no API credit. Add credit, or switch to Gemini in the sidebar."
                 elif "Login failed" in msg or "TDS" in msg:
                     msg = "Can't reach the database. Start SQL Server in Docker (docker start sqlserver) and try again."
+                elif isinstance(e, db.SetupError):
+                    msg = f"Setup: {msg}"
+                elif "connection" in msg.lower() or "could not connect" in msg.lower():
+                    msg = f"Can't reach the database ({db.describe()}). Check DATABASE_URL in .env and that the server is running."
                 status.update(label=f"Stopped: {msg[:160]}", state="error")
             if run:
                 n = len(run["steps"])

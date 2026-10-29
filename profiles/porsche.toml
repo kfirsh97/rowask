@@ -1,0 +1,38 @@
+# The Porsche car-sales database this project was built on (../sql).
+# It runs on SQL Server (set DB_USER / DB_PASSWORD in .env, see SETUP.md) or, with no setup at all,
+# on the SQLite copy in data/porsche.sqlite.
+
+title = "Porsche SQL Agent"
+description = """Chat with the Porsche sales database in Hebrew or English. Ask a business question, then keep
+going with follow-ups like "and in 2023?". The agent writes the SQL, checks its own result,
+and shows the query behind every answer."""
+business = "a Porsche car-sales business"
+database_url = "sqlite:///data/porsche.sqlite"     # used only when .env has no DATABASE_URL and no DB_USER
+answer_key = true                                   # eval_questions.py has 12 questions with known answers
+
+examples = [
+    "כמה מכירות היו בכל שנה?",
+    "מי שלושת המוכרים עם סך המכירות הגבוה ביותר?",
+    "Which 5 car models sold for the highest average price?",
+    "באיזו מדינה יש הכי הרבה לקוחות?",
+]
+
+# Business meaning of columns that the raw schema cannot tell the model.
+# eval.py --notes off measures how much these improve accuracy.
+notes = """
+- Sales.Sold_Price: final sale price of the car, in US dollars. Sales.Sold_Date: date of the sale.
+- Sales.Views / Followers / Comments: engagement counts on the car's sale listing.
+- Sellers.Dealer_Or_PrivateParty: 'Dealer' or 'Private Party'. Dealer details are in Dealer_Sellers,
+  private sellers in Private_Seller (both share Seller_ID with Sellers).
+- DealersWithInsurances: which insurance companies (Insurance.InsuranceID) each dealer works with.
+- CARS.YEAR: the car's model year. CARS.Title: listing title, includes the model name (e.g. 'Turbo', 'Carrera').
+- CARS.Mileage: odometer reading in miles.
+- CARS.OWNERS: free text. 'CARFAX 1-Owner vehicle' = one owner; 'NPrevious owners' (no space, e.g. '3Previous owners')
+  = N previous owners; 'Types of owners: ...' lists owner types.
+- Policy.Insurance_Type: 'Mandatory', 'Comprehensive' or 'Third Party'.
+- Services.Service_Cost: cost of one service visit in US dollars (0-3000).
+- Payments.Amount: payment amount in US dollars. Payments.Seller_Commission: the seller's commission in US dollars.
+- ZipCodes.State: full US state name in English (e.g. 'California', 'New York').
+- Customers.FOLLOW / COMMENTS: how many listings the customer follows / comments they wrote.
+- Ages: a car's age in years = the current year minus CARS.YEAR.
+"""

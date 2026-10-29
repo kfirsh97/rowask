@@ -28,6 +28,12 @@ A hand-written agent loop (~100 lines, no agent framework), so every decision is
 
 **Two model providers**, same tools, prompt and safety: Gemini (`PROVIDER=gemini`) or Claude (`PROVIDER=claude`).
 
+**Any database.** Nothing in the agent is tied to Porsche: it reads the structure of whatever database it is
+connected to, and the SQL dialect (T-SQL, PostgreSQL, SQLite, MySQL) is told to the model from the connection.
+What it knows *about* a database – what the business is, units and codes, example questions – lives in a small
+profile file (`profiles/*.toml`). Tested here on three databases: Porsche on SQL Server and on SQLite, and the public
+Chinook music-store database on SQLite and PostgreSQL. See [SETUP.md → Your own database](SETUP.md#your-own-database).
+
 ## Safety – three layers
 
 | Layer | What it stops |
@@ -80,7 +86,7 @@ pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
 python check_setup.py          # DB connection, read-only check, API key check
 python -m streamlit run app.py # web chat on http://localhost:8501
-python -m pytest tests         # 43 tests, no database or API key needed
+python -m pytest tests         # 65 tests (3 need a PostgreSQL server), no API key needed
 ```
 
 ## Files
@@ -91,8 +97,11 @@ python -m pytest tests         # 43 tests, no database or API key needed
 | `tools.py` | `get_schema`, `run_query`, the SQL safety validator and the business notes |
 | `eval.py` · `eval_questions.py` · `compare.py` | Answer key, evaluation runner and result comparison |
 | `app.py` | The web chat (Streamlit) |
-| `db.py` · `check_setup.py` · `setup/` · `SETUP.md` | Database connection, setup check, read-only user, setup guide |
-| `tests/` | Safety, agent loop (with a fake model), comparison and evaluation tests |
+| `db.py` | Connects to any database (SQLAlchemy); read-only sessions, 30-second query limit, dialect hints for the model |
+| `dbprofile.py` · `profiles/` | Per-database knowledge: business line, notes, example questions |
+| `data/` | SQLite copies: Porsche (built by `setup/build_sqlite.py`) and the Chinook sample database |
+| `check_setup.py` · `setup/` · `SETUP.md` | Setup check, read-only user, SQLite builder, setup guide |
+| `tests/` | Safety, agent loop (with a fake model), real-database tests on SQLite and PostgreSQL, comparison and evaluation |
 
 ## Web interface
 
