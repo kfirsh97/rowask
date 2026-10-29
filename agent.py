@@ -100,7 +100,7 @@ def _summary(result: dict) -> str:
 
 def ask(question: str, client=None, verbose=True) -> dict:
     """Run the agent loop for one question. Returns the answer, the last SQL and every step."""
-    client = client or genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = client or genai.Client(api_key=os.environ["GEMINI_API_KEY"].strip().strip("'\"").strip())
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         tools=[TOOLS],
@@ -151,7 +151,7 @@ def ask(question: str, client=None, verbose=True) -> dict:
 
 
 def list_models():
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"].strip().strip("'\"").strip())
     for m in client.models.list():
         actions = getattr(m, "supported_actions", None) or []
         if not actions or "generateContent" in actions:
