@@ -28,7 +28,7 @@ from tools import get_schema, run_query
 
 load_dotenv()
 
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 MAX_STEPS = 8
 LOG_DIR = Path(__file__).parent / "logs"
 
@@ -105,7 +105,7 @@ def ask(question: str, client=None, verbose=True) -> dict:
         system_instruction=SYSTEM_PROMPT,
         tools=[TOOLS],
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),  # we run the loop ourselves
-        temperature=0,
+        # temperature left at the model default: newer Gemini models are tuned for it
     )
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=question)])]
     steps, last_sql, answer = [], None, None
@@ -179,6 +179,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     except Exception as e:
+        if "404" in str(e) and "model" in str(e).lower():
+            sys.exit(f"Model '{MODEL}' is not available to your key. Run: python agent.py --models, "
+                     "then set GEMINI_MODEL=<a flash model from the list> in .env")
         if "API_KEY_INVALID" in str(e) or "API key not valid" in str(e):
             sys.exit("Gemini rejected the API key. Create a new one at https://aistudio.google.com/apikey, "
                      "put it in .env as GEMINI_API_KEY=... (no quotes), then run: python check_setup.py")
