@@ -2,6 +2,10 @@ pymssql==2.4.6
 sqlalchemy==2.0.43
 psycopg[binary]==3.2.10
 tomli==2.2.1; python_version < "3.11"
+pandas==2.3.3
+openpyxl==3.1.5
+xlrd==2.0.2
+charset-normalizer==3.4.4
 google-genai==2.34.0
 anthropic==2.3.0
 python-dotenv==1.2.4

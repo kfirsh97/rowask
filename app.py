@@ -2,11 +2,14 @@
 
 Run:   python -m streamlit run app.py
 Demo:  DEMO=1 python -m streamlit run app.py     (replays two recorded runs - no database or API key needed)
-Title, description and example questions come from the active profile (DB_PROFILE, see profiles/).
+Title, description and example questions come from the active profile (DB_PROFILE, see profiles/) -
+or, after someone uploads files in the sidebar, from the cleaned upload (for that browser session only).
 """
+import contextvars
 import glob
 import json
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -14,6 +17,8 @@ from pathlib import Path
 import streamlit as st
 
 import db
+import dbprofile
+import upload as uploads
 from dbprofile import load_profile
 
 HERE = Path(__file__).parent
@@ -22,6 +27,35 @@ HERE = Path(__file__).parent
 def esc(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 DEMO = os.environ.get("DEMO", "").lower() in ("1", "true", "yes")
+UPLOAD_TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "xls", "sqlite", "sqlite3", "db"]
+
+
+def sync_upload():
+    """Build a database from the files in the sidebar uploader whenever they change, and drop it when they are
+    removed. Runs at the top of every page run, so the title, the agent and the schema all follow the upload."""
+    files = st.session_state.get(f"files{st.session_state.get('upload_gen', 0)}") or []
+    signature = tuple((f.name, f.size) for f in files)
+    if signature == st.session_state.get("upload_sig", ()):
+        return
+    old = st.session_state.pop("upload", None)
+    if old:
+        uploads.remove(old)
+    st.session_state.upload_sig, st.session_state.upload_error = signature, None
+    st.session_state.history = []                                   # new data, new conversation
+    st.session_state.chat_id = st.session_state.get("chat_id", 0) + 1
+    if files:
+        try:
+            st.session_state.upload = uploads.build([(f.name, f.getvalue()) for f in files],
+                                                    Path(tempfile.mkdtemp(prefix="sql-agent-upload-")))
+        except Exception as e:
+            st.session_state.upload_error = str(e)
+
+
+if not DEMO:
+    sync_upload()
+UPLOAD = st.session_state.get("upload")
+db.SESSION_URL.set(UPLOAD.url if UPLOAD else None)                 # this session only - see db.py
+dbprofile.SESSION_PROFILE.set(UPLOAD.profile if UPLOAD else None)
 
 try:
     PROFILE = load_profile("porsche" if DEMO else None)      # the recorded demo runs are on Porsche
@@ -97,6 +131,13 @@ st.html(f"""
 """)
 if PROFILE_ERROR:
     st.error(PROFILE_ERROR)
+if UPLOAD:
+    tables = ", ".join(f"{t} ({n:,} rows)" for t, n in UPLOAD.tables.items())
+    with st.expander(f"Loaded {len(UPLOAD.tables)} table{'s' if len(UPLOAD.tables) != 1 else ''}: {tables}",
+                     expanded=not st.session_state.get("history"), icon=":material/cleaning_services:"):
+        st.markdown("**What was cleaned**\n\n" + "\n".join(f"- {esc(r)}" for r in UPLOAD.report))
+        st.caption("The agent also gets a description of every column - its values, ranges and dates - "
+                   "so it can write correct SQL for data it has never seen.")
 
 
 # ------------------------------------------------------------------ sidebar
@@ -118,6 +159,13 @@ with st.sidebar:
                         label_visibility="collapsed", disabled=DEMO, key="provider")
     notes = st.toggle("Business notes in the schema", value=True, disabled=DEMO, key="notes",
                       help="Currency, units and value formats the raw schema cannot tell the model.")
+    st.markdown("#### Your data")
+    st.file_uploader("Upload CSV, Excel or a SQLite database", type=UPLOAD_TYPES, accept_multiple_files=True,
+                     key=f"files{st.session_state.get('upload_gen', 0)}", disabled=DEMO,
+                     help="Files are cleaned (column names, dates, numbers, codes) and loaded into a database "
+                          "for this browser session only. Remove them to go back to the default database.")
+    if st.session_state.get("upload_error"):
+        st.error(st.session_state.upload_error)
     st.markdown("#### Database")
     try:
         st.caption("Recorded runs - no database connected" if DEMO
@@ -220,7 +268,8 @@ def run_live(question, status, live, history, job):
         except Exception as e:
             job["error"] = e
 
-    worker = threading.Thread(target=work, daemon=True)
+    # copy_context: the background thread must see this session's upload (db.SESSION_URL), not the default
+    worker = threading.Thread(target=contextvars.copy_context().run, args=(work,), daemon=True)
     worker.start()
     while worker.is_alive():
         live.html(trace_html(job["steps"]))      # every redraw is also the moment Streamlit can notice a Stop click

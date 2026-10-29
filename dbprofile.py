@@ -4,6 +4,7 @@ A profile is a small TOML file in profiles/ - title, a line about the business, 
 (currency, units, how values are coded), example questions, and optionally a default database URL.
 Pick one with DB_PROFILE=<name> in .env. DB_PROFILE=generic works on any database with no file at all.
 """
+import contextvars
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -28,6 +29,10 @@ DEFAULTS = {
 }
 
 
+# The description built for an uploaded file, for one browser session (see db.SESSION_URL).
+SESSION_PROFILE = contextvars.ContextVar("session_profile", default=None)
+
+
 def profile_name() -> str:
     return os.environ.get("DB_PROFILE", "").strip() or "porsche"
 
@@ -37,7 +42,10 @@ def available() -> list:
 
 
 def load_profile(name: str = None) -> dict:
-    """The active profile (DB_PROFILE), or the one named. Cached per name, so switching DB_PROFILE takes effect."""
+    """The active profile: an upload's (this session), else DB_PROFILE, or the one named.
+    Cached per name, so switching DB_PROFILE takes effect."""
+    if name is None and SESSION_PROFILE.get():
+        return SESSION_PROFILE.get()
     return _load(name or profile_name())
 
 

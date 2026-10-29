@@ -86,7 +86,7 @@ pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
 python check_setup.py          # DB connection, read-only check, API key check
 python -m streamlit run app.py # web chat on http://localhost:8501
-python -m pytest tests         # 69 tests (3 need a PostgreSQL server), no API key needed
+python -m pytest tests         # 78 tests (3 need a PostgreSQL server), no API key needed
 ```
 
 ## Files
@@ -99,6 +99,7 @@ python -m pytest tests         # 69 tests (3 need a PostgreSQL server), no API k
 | `app.py` | The web chat (Streamlit) |
 | `db.py` | Connects to any database (SQLAlchemy); read-only sessions, 30-second query limit, dialect hints for the model |
 | `dbprofile.py` · `profiles/` | Per-database knowledge: business line, notes, example questions |
+| `upload.py` | Uploads on the web page: reading CSV/Excel, cleaning, building the session's database, describing it |
 | `data/` | SQLite copies: Porsche (built by `setup/build_sqlite.py`) and the Chinook sample database |
 | `check_setup.py` · `setup/` · `SETUP.md` | Setup check, read-only user, SQLite builder, CSV importer, setup guide |
 | `tests/` | Safety, agent loop (with a fake model), real-database tests on SQLite and PostgreSQL, comparison and evaluation |
@@ -112,6 +113,13 @@ DEMO=1 python -m streamlit run app.py    # replays two recorded runs - no databa
 
 A chat: ask in Hebrew or English, then keep going with follow-up questions – the agent remembers the
 conversation, and **New conversation** in the sidebar starts over. **Stop** ends a question mid-way: the agent
-runs in the background, checks before every model call, and makes no more calls once stopped. Watch each step as it happens: the schema read, every query with its row count,
+runs in the background, checks before every model call, and makes no more calls once stopped.
+
+**Upload your own data** in the sidebar – CSV, Excel (every sheet becomes a table) or a SQLite file. CSV and Excel
+are cleaned on the way in and the page lists every change: SQL-safe column names, dates as `YYYY-MM-DD`, codes that
+Excel turned into `77095.0` back to `77095`, `"$1,234"` and `"45%"` as numbers, curly quotes made plain, empty rows
+dropped. Hebrew files saved by Excel on Windows are detected and read correctly. The agent also gets a description of
+every column (values, ranges, dates), so it can query data it has never seen. Uploads are for that browser session
+only – other people using the same page keep the default database. Watch each step as it happens: the schema read, every query with its row count,
 then the answer, the result table and the SQL behind it. The sidebar switches between Claude and Gemini and
 turns the business notes on or off.

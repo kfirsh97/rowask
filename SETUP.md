@@ -197,7 +197,11 @@ tells it what they mean – on the Porsche database, these notes took accuracy f
 
 ### From CSV or Excel files
 
-No database at all, just a spreadsheet? Save it as CSV (Excel: File → Save As → CSV UTF-8) and turn it into a
+**Easiest: upload them on the web page.** In the sidebar, under *Your data*, drop in CSV or Excel files (or a SQLite
+file). They are cleaned, loaded and described for the agent, and the page shows what was changed. Nothing to set in
+`.env`; remove the files to go back to the default database.
+
+To keep a file as a permanent database instead: Save it as CSV (Excel: File → Save As → CSV UTF-8) and turn it into a
 SQLite database – one table per file, column types detected from the data, codes with leading zeros kept as text:
 
 ```bash

@@ -1,6 +1,7 @@
 """Database connection for the SQL agent - any database SQLAlchemy can reach.
 
 Which database (first match wins):
+  0. a file uploaded on the web page - for that browser session only (SESSION_URL, set by app.py)
   1. DATABASE_URL in .env, e.g.
        postgresql://agent_reader:password@localhost:5432/shop
        mssql+pymssql://agent_reader:password@localhost:1433/Porsche
@@ -12,6 +13,7 @@ Read-only, three ways: the agent's own validator (tools.py) lets through only si
 opened read-only and PostgreSQL sessions start read-only; and for any server you connect a read-only user.
 Every query is stopped after QUERY_TIMEOUT_S seconds.
 """
+import contextvars
 import os
 import sqlite3
 import time
@@ -46,11 +48,19 @@ DIALECT_HINTS = {
 }
 
 
+# Set by the web page for one browser session (an uploaded file), so two people never see each other's data.
+# A context variable follows the code into the agent's background thread when the thread is started with
+# contextvars.copy_context().run - see app.py.
+SESSION_URL = contextvars.ContextVar("session_database_url", default=None)
+
+
 class SetupError(RuntimeError):
     """A configuration problem the user can fix (shown as a plain message, not a stack trace)."""
 
 
 def database_url() -> str:
+    if SESSION_URL.get():
+        return SESSION_URL.get()
     url = os.environ.get("DATABASE_URL", "").strip().strip("'\"")
     if url:
         return url
@@ -128,6 +138,8 @@ def dialect_hint() -> str:
 
 def describe() -> str:
     """Where we are connected, with the password hidden - safe to print or show in the UI."""
+    if SESSION_URL.get():
+        return "your uploaded files (this browser session only)"
     url = make_url(database_url())
     if url.get_backend_name() == "sqlite":
         return f"SQLite file {Path(url.database).name}"
