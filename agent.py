@@ -80,6 +80,7 @@ def call_tool(name: str, args: dict) -> dict:
 
 
 FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]   # used only if the main model is overloaded
+_working_model = None   # remembers the model that last worked, so a long run stops re-trying a busy one
 
 
 def _is_temporary(e: Exception) -> bool:
@@ -140,18 +141,23 @@ def _run_gemini(question, client, verbose):
         if step == 1:
             # If the main model is overloaded, switch before the conversation starts.
             # (We never switch mid-conversation: a model may not accept another model's turns.)
-            for i, candidate in enumerate([MODEL] + FALLBACK_MODELS):
+            global _working_model
+            order = [MODEL] + FALLBACK_MODELS
+            if _working_model in order:          # start from the model that worked last time
+                order.remove(_working_model)
+                order.insert(0, _working_model)
+            for i, candidate in enumerate(order):
                 try:
                     if verbose:
                         print(f"  ... thinking ({candidate})", flush=True)
                     # one quick retry on the main model, then move on to a less busy one
                     response = _generate(client, candidate, contents, config, retries=1 if i == 0 else 2)
-                    model = candidate
+                    model = _working_model = candidate
                     break
                 except Exception as e:
-                    if not _is_temporary(e) or i == len(FALLBACK_MODELS):
+                    if not _is_temporary(e) or i == len(order) - 1:
                         raise
-                    print(f"   ({candidate} unavailable - switching to {FALLBACK_MODELS[i]})")
+                    print(f"   ({candidate} unavailable - switching to {order[i + 1]})")
         else:
             if verbose:
                 print(f"  ... thinking ({model})", flush=True)

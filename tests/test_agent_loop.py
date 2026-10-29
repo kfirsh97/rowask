@@ -79,10 +79,16 @@ def test_switches_model_when_main_is_overloaded(monkeypatch, tmp_path):
             content = agent.types.Content(role="model", parts=[agent.types.Part.from_text(text="ok")])
             return SimpleNamespace(function_calls=None, text="answer", candidates=[SimpleNamespace(content=content)])
 
+    monkeypatch.setattr(agent, "_working_model", None)
     r = agent.ask("q", client=SimpleNamespace(models=Busy()), verbose=False)
     assert r["answer"] == "answer"
     assert r["model"] == agent.FALLBACK_MODELS[0]
     assert used.count(agent.MODEL) == 2          # 1 try + 1 quick retry before switching
+
+    # The next question starts directly with the model that worked - no time wasted on the busy one.
+    used.clear()
+    agent.ask("q2", client=SimpleNamespace(models=Busy()), verbose=False)
+    assert used == [agent.FALLBACK_MODELS[0]]
 
 
 def test_claude_loop_fixes_error_and_answers(monkeypatch, tmp_path):
