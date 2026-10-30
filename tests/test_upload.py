@@ -110,7 +110,7 @@ def test_upload_is_for_this_session_only(tmp_path):
 
 
 # ------------------------------------------------------------------ SQL scripts
-SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
+SQL_DIR = Path(__file__).resolve().parents[1] / "data" / "porsche_sql"
 
 
 def test_porsche_sql_server_scripts_load_exactly(tmp_path):

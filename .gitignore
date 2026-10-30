@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+logs/
+eval_results/
+# Data you load yourself (e.g. setup/csv_to_sqlite.py) stays on your computer
+data/superstore.*
+# Dashboards you pin are saved on your computer
+dashboards/
+.pytest_cache/

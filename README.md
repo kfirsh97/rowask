@@ -1,9 +1,22 @@
 # RowAsk 🤖 – ask your database in plain language
 
-**RowAsk** is an AI agent that answers business questions about a database — in Hebrew or English. It was built on
-the [Porsche sales database](../README.md) and works on any other one (or on your own CSV and Excel files).
-It reads the schema, writes the SQL, runs it, checks its own result, fixes its own errors, and answers with the query
-it used, so every answer can be verified.
+**RowAsk** is an AI agent that answers business questions about a database — in Hebrew or English. It reads the
+schema, writes the SQL, runs it, checks its own result, fixes its own errors, and answers with the query it used, so
+every answer can be verified. It works on SQL Server, PostgreSQL, SQLite and MySQL, or on your own CSV, Excel and SQL
+files uploaded in the page. It was first built on my [Porsche sales database](https://github.com/kfirsh97/porsche-sales-database),
+an SQL course project, which is still its main benchmark (12/12 on questions with known answers).
+
+**What it does**
+
+- **Chat** with follow-up questions, in a Streamlit web page or on the command line
+- **Any database**, with a small profile file for what the data means; or **upload** CSV, Excel, SQL scripts, SQLite
+- **Charts** drawn from the real rows (bar, line, pie, US and world maps, heatmap...), a chart-type switcher, and
+  **drill-down**: click a region to see its states, then their cities
+- **Dashboards** of pinned queries that rerun live, exported as one standalone HTML page
+- **Edit the SQL** behind any answer and rerun it; download the whole result as **Excel or CSV**
+- **Checks on every answer**: joins that repeat rows, empty values, incomplete periods; the agent's assumptions
+  shown in one line
+- **Answer keys** that measure accuracy, including trap questions (13/16 then 2 fixes on the Superstore sample)
 
 ```
 $ python agent.py "כמה מכירות היו בכל שנה?"
@@ -118,7 +131,7 @@ would otherwise have to dig out of the SQL.
 Short version, once the database is running and loaded:
 
 ```bash
-cd agent
+git clone https://github.com/kfirsh97/rowask && cd rowask
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
@@ -195,7 +208,7 @@ again, live – headline numbers on top as stat tiles, charts below – with reo
 HTML**: one standalone page with the charts, the table and the SQL behind each, to send to someone without the app.
 
 **Upload your own data** in the sidebar – CSV, Excel (every sheet becomes a table), **SQL scripts**, or a SQLite file.
-A SQL script (CREATE TABLE + INSERT – a dump, or a course project like this one's `sql/` folder) can be written for
+A SQL script (CREATE TABLE + INSERT – a dump, or a course project like `data/porsche_sql/`) can be written for
 SQL Server, MySQL, PostgreSQL or SQLite: it is translated where needed (sqlglot), server-only statements are skipped,
 IDENTITY keys keep their original values, and foreign keys added later with ALTER TABLE are kept so the agent can
 JOIN a normalized schema. Uploading this project's own two T-SQL files rebuilds all 18 tables and 58,339 rows exactly.

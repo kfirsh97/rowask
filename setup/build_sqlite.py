@@ -1,9 +1,9 @@
-"""Build a SQLite copy of the Porsche database from the SQL Server scripts in ../sql.
+"""Build a SQLite copy of the Porsche database from the SQL Server scripts in data/porsche_sql.
 
 SQLite is a whole database in one file - no server, no Docker - so this copy lets anyone try the
 agent in a minute, and lets the tests run the agent's tools against real data.
 
-Run (from the agent folder):  python setup/build_sqlite.py
+Run:  python setup/build_sqlite.py
 Output: data/porsche.sqlite
 
 What has to change between the two dialects:
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 AGENT = Path(__file__).resolve().parents[1]
-SQL = AGENT.parent / "sql"
+SQL = AGENT / "data" / "porsche_sql"
 OUT = AGENT / "data" / "porsche.sqlite"
 
 

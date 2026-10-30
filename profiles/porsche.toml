@@ -1,4 +1,4 @@
-# The Porsche car-sales database this project was built on (../sql).
+# The Porsche car-sales database this tool was first built on (github.com/kfirsh97/porsche-sales-database).
 # It runs on SQL Server (set DB_USER / DB_PASSWORD in .env, see SETUP.md) or, with no setup at all,
 # on the SQLite copy in data/porsche.sqlite.
 

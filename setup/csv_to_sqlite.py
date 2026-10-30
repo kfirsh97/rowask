@@ -5,7 +5,7 @@ whole numbers -> INTEGER, decimals -> REAL, everything else -> TEXT. A column of
 leading zeros (ZIP codes, phone numbers, IDs like 00123) stays TEXT, so the zeros are not lost.
 Dates are kept as they appear in the file - SQLite reads 'YYYY-MM-DD' best.
 
-Run (from the agent folder):
+Run (from the repository folder):
   python setup/csv_to_sqlite.py data/superstore.csv
   python setup/csv_to_sqlite.py orders.csv customers.csv --out data/shop.sqlite
 Then point the agent at it in .env:   DATABASE_URL=sqlite:///data/superstore.sqlite

@@ -13,7 +13,7 @@ Three ways to run it, from fastest to fullest:
 `data/porsche.sqlite` is a complete copy of the Porsche database in one file, so nothing else is needed:
 
 ```bash
-cd agent
+git clone https://github.com/kfirsh97/rowask && cd rowask
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
@@ -59,12 +59,12 @@ Give it about 20 seconds to start. After a restart of your computer, you only ne
 
 ## 2. Load the database
 
-From the **repository root** (the folder that contains `sql/` and `agent/`), copy the scripts into the
-container and run them in order. Replace the password with yours.
+From the **repository folder** (`rowask`), copy the scripts into the container and run them in order.
+Replace the password with yours. (The scripts come from the [Porsche project](https://github.com/kfirsh97/porsche-sales-database).)
 
 ```bash
-docker cp sql sqlserver:/tmp/sql
-docker cp agent/setup sqlserver:/tmp/setup
+docker cp data/porsche_sql sqlserver:/tmp/sql
+docker cp setup sqlserver:/tmp/setup
 
 SQLCMD="docker exec sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P YourStrong!Passw0rd -C"
 $SQLCMD -i /tmp/sql/01_schema.sql           # creates the Porsche database and its 18 tables
@@ -84,13 +84,14 @@ $SQLCMD -d Porsche -Q "SELECT COUNT(*) FROM Sales"
 > Prefer a GUI? Connect [Azure Data Studio](https://learn.microsoft.com/azure-data-studio/) or VS Code's
 > SQL Server extension to `localhost,1433` as `sa`, and run the same three files in the same order.
 
-The read-only user's password is set in `agent/setup/01_create_reader.sql` (`Reader!Passw0rd`).
+The read-only user's password is set in `setup/01_create_reader.sql` (`Reader!Passw0rd`).
 To change it, edit that line before running the file, and use the same value in `.env` below.
 
 ## 3. Install the agent
 
+From the repository folder:
+
 ```bash
-cd agent
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -170,7 +171,7 @@ DATABASE_URL=postgresql://agent_reader:password@db.example.com:5432/shop
 |---|---|---|
 | PostgreSQL | `postgresql://user:password@host:5432/dbname` | included |
 | SQL Server | `mssql://user:password@host:1433/dbname` | included |
-| SQLite | `sqlite:///path/to/file.db` (relative to `agent/`, or absolute) | built in |
+| SQLite | `sqlite:///path/to/file.db` (relative to the repository folder, or absolute) | built in |
 | MySQL / MariaDB | `mysql://user:password@host:3306/dbname` | `pip install pymysql` |
 
 Special characters in the password must be URL-encoded (`!` → `%21`, `@` → `%40`, `#` → `%23`).
@@ -232,6 +233,6 @@ and expected queries to measure it.
 | `port is already allocated` on `docker run` | Something already uses port 1433 – often an older `sqlserver` container: `docker start sqlserver` instead. |
 | Gemini is slow or `503 / overloaded` | Free-tier models get busy. The agent retries and switches models by itself; give it a moment. |
 | `No profile '...'` | `DB_PROFILE` in `.env` names a file that isn't in `profiles/`. Use `porsche`, `chinook`, `generic`, or add your own. |
-| `SQLite file not found` | The path in `DATABASE_URL` is relative to the `agent` folder. For the Porsche copy: `python setup/build_sqlite.py` rebuilds it. |
+| `SQLite file not found` | The path in `DATABASE_URL` is relative to the repository folder. For the Porsche copy: `python setup/build_sqlite.py` rebuilds it. |
 | `The driver for mysql is not installed` | `pip install pymysql` |
 | `Query stopped after 30 seconds` | The model gets this back and writes a cheaper query. Very large tables may need indexes or a summary view. |

@@ -223,7 +223,7 @@ with st.sidebar:
         st.session_state.history = []
         st.session_state.chat_id = st.session_state.get("chat_id", 0) + 1   # fresh example picker too
         st.rerun()
-    st.markdown("[Source code on GitHub](https://github.com/kfirsh97/porsche-sales-database/tree/main/agent)")
+    st.markdown("[Source code on GitHub](https://github.com/kfirsh97/rowask)")
 
 
 # ------------------------------------------------------------------ rendering

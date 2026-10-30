@@ -5,7 +5,7 @@ Which database (first match wins):
   1. DATABASE_URL in .env, e.g.
        postgresql://agent_reader:password@localhost:5432/shop
        mssql+pymssql://agent_reader:password@localhost:1433/Porsche
-       sqlite:///data/porsche.sqlite          (a path relative to the agent folder, or an absolute one)
+       sqlite:///data/porsche.sqlite          (a path relative to the repository folder, or an absolute one)
   2. DB_USER / DB_PASSWORD / DB_HOST / DB_PORT / DB_NAME - the original SQL Server settings, still supported
   3. the database_url in the active profile (profiles/<DB_PROFILE>.toml)
 
