@@ -27,7 +27,7 @@ A hand-written agent loop (~100 lines, no agent framework), so every decision is
    turns is resent, not their tool calls, which keeps requests small. Messages that need no data
    ("thanks", "explain that query") get a direct reply without touching the database.
 
-**Two model providers**, same tools, prompt and safety: Gemini (`PROVIDER=gemini`) or Claude (`PROVIDER=claude`).
+**Two model providers**, same tools, prompt and safety: Claude (`PROVIDER=claude`, the default) or Gemini (`PROVIDER=gemini`).
 
 **Any database.** Nothing in the agent is tied to Porsche: it reads the structure of whatever database it is
 connected to, and the SQL dialect (T-SQL, PostgreSQL, SQLite, MySQL) is told to the model from the connection.

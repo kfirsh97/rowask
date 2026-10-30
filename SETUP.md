@@ -110,9 +110,9 @@ cp .env.example .env
 Open `.env` and fill in:
 
 ```ini
-PROVIDER=gemini                 # or claude
-GEMINI_API_KEY=your-key         # no quotes
-ANTHROPIC_API_KEY=              # only if PROVIDER=claude
+PROVIDER=claude                 # the default; or gemini (free tier)
+ANTHROPIC_API_KEY=your-key      # no quotes
+GEMINI_API_KEY=                 # only if PROVIDER=gemini
 DB_PASSWORD=Reader!Passw0rd     # the read-only user's password from step 2
 ```
 

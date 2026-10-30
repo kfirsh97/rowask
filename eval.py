@@ -34,7 +34,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ids", help="comma-separated question ids, e.g. 1,2,3")
     ap.add_argument("--notes", choices=["on", "off"], default="on", help="business notes in the schema")
-    ap.add_argument("--provider", choices=["gemini", "claude"], default=os.environ.get("PROVIDER", "gemini"))
+    ap.add_argument("--provider", choices=["gemini", "claude"], default=os.environ.get("PROVIDER", "claude"))
     ap.add_argument("--pause", type=float, default=5, help="seconds between questions (free-tier rate limits)")
     ap.add_argument("--model", help="pin a single Gemini model and disable fallback")
     args = ap.parse_args()

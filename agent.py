@@ -14,7 +14,7 @@ Run:
   python agent.py            (interactive chat - follow-up questions see the earlier turns)
   python agent.py --models   (list the Gemini models your key can use)
 
-Provider: set PROVIDER=gemini (default) or PROVIDER=claude in .env.
+Provider: set PROVIDER=claude (default) or PROVIDER=gemini in .env.
 """
 import json
 import os
@@ -321,7 +321,7 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
     history: earlier turns of the same chat, as [{"question": ..., "answer": ...}], oldest first.
     should_stop: optional function, checked before every model call; when it returns True the agent stops.
     Returns the answer, the last SQL and every step, and writes them to the log."""
-    provider = (provider or os.environ.get("PROVIDER", "gemini")).lower()
+    provider = (provider or os.environ.get("PROVIDER", "claude")).lower()
     started = time.time()
     run = _run_claude if provider == "claude" else _run_gemini
     answer, steps, last_sql, model = run(question, client, verbose, on_step, history, should_stop)
@@ -368,7 +368,7 @@ def main():
         q = questions.pop() if questions else input("\nQuestion (empty to quit): ").strip()
         if not q:
             break
-        provider = os.environ.get("PROVIDER", "gemini").lower()
+        provider = os.environ.get("PROVIDER", "claude").lower()
         print(f"\n[{CLAUDE_MODEL if provider == 'claude' else MODEL}] {q}")
         r = ask(q, history=history)
         history.append(r)

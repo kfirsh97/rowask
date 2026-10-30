@@ -72,7 +72,7 @@ def check_claude():
         print("Anthropic API key: valid, and the account has credit")
     except Exception as e:
         print("Anthropic API key: problem -", str(e)[:200])
-    print("Active provider:", os.environ.get("PROVIDER", "gemini"))
+    print("Active provider:", os.environ.get("PROVIDER", "claude"))
 
 if __name__ == "__main__":
     main()

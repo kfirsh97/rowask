@@ -180,7 +180,7 @@ def latest_score(profile):
 
 with st.sidebar:
     st.markdown("#### Model")
-    provider = st.radio("Provider", ["claude", "gemini"], index=0 if os.environ.get("PROVIDER") == "claude" else 1,
+    provider = st.radio("Provider", ["claude", "gemini"], index=1 if os.environ.get("PROVIDER") == "gemini" else 0,
                         format_func=lambda p: {"claude": "Claude (paid API)", "gemini": "Gemini (free tier)"}[p],
                         label_visibility="collapsed", disabled=DEMO, key="provider")
     notes = st.toggle("Business notes in the schema", value=True, disabled=DEMO, key="notes",
