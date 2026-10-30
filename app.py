@@ -21,6 +21,7 @@ import dashboards
 import db
 import drill
 import dbprofile
+import exports
 import upload as uploads
 from dbprofile import load_profile
 
@@ -117,7 +118,9 @@ st.html("""
   font: .8rem/1.45 var(--mono); color: var(--slate); background: var(--paper);
   border: 1px solid var(--rule); border-radius: 4px; padding: .35rem .5rem;
 }
+[class*="st-key-sql"] textarea { font: .82rem/1.5 var(--mono); }
 .meta { color: var(--steel); font-size: .86rem; font-variant-numeric: tabular-nums; }
+.edited { border-left: 3px solid var(--oak); padding: .3rem .7rem; background: var(--paper); color: var(--slate); font-size: .88rem; margin: .2rem 0 .6rem; }
 .demo-note { border-left: 3px solid var(--signal); padding: .4rem .7rem; background: var(--paper); color: var(--slate); font-size: .9rem; margin-bottom: 1rem; }
 
 .score { display: flex; align-items: baseline; gap: .5rem; }
@@ -365,26 +368,106 @@ def chart_view(key, spec, columns, rows, sql, height=300, tabs=True, on_type=Non
     return spec
 
 
+# ------------------------------------------------------------------ the SQL panel: edit, rerun, download
+def edit_state(key) -> dict:
+    return st.session_state.setdefault("edits", {}).get(key) or {}
+
+
+def run_edit(key, on_save=None):
+    """Run the SQL typed into the panel. Same read-only checks as the agent's queries; nothing is saved on error."""
+    sql = (st.session_state.get(f"sql{key}") or "").strip()
+    edits = st.session_state.setdefault("edits", {})
+    try:
+        cols, rows = tools_mod().run_query_all(sql, max_rows=500)
+    except Exception as e:
+        edits[key] = {**edits.get(key, {}), "error": tools_mod()._clean_error(e) if not isinstance(e, ValueError) else str(e)}
+        return
+    st.session_state.setdefault("drill", {}).pop(key, None)
+    if on_save:                                    # a dashboard card keeps the new query
+        on_save(sql)
+        edits.pop(key, None)
+    else:
+        edits[key] = {"sql": sql, "columns": cols, "rows": rows, "version": edits.get(key, {}).get("version", 0) + 1}
+
+
+def reset_edit(key, original):
+    st.session_state.setdefault("edits", {}).pop(key, None)
+    st.session_state.setdefault("drill", {}).pop(key, None)
+    st.session_state[f"sql{key}"] = original
+
+
+def download_buttons(key, sql, title, columns, rows):
+    """Excel and CSV of the whole query - run again when the button is pressed, in this session's database."""
+    ctx = contextvars.copy_context()           # the download runs on another thread: carry the upload/profile along
+
+    def full():
+        try:
+            return ctx.copy().run(exports.full_result, sql)
+        except Exception:
+            return columns, rows               # the query stopped working: at least the rows on screen
+
+    row = st.container(horizontal=True, gap="small")
+    xl = csv = row
+    xl.download_button("Excel", icon=":material/table_view:", key=f"xl{key}", on_click="ignore",
+                       file_name=exports.file_name(title, "xlsx"),
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       data=lambda: exports.to_excel(*full(), sql=sql, title=title))
+    csv.download_button("CSV", icon=":material/download:", key=f"csv{key}", on_click="ignore",
+                        file_name=exports.file_name(title, "csv"), mime="text/csv",
+                        data=lambda: exports.to_csv(*full()))
+
+
+def sql_panel(key, sql, title, columns, rows, on_save=None, label="SQL behind this answer"):
+    """The query behind a result: edit it and run it again, or download the whole result."""
+    edit = edit_state(key)
+    with st.expander(label, expanded=bool(edit)):
+        current = edit.get("sql") or sql
+        if f"sql{key}" not in st.session_state:
+            st.session_state[f"sql{key}"] = current
+        st.text_area("SQL", key=f"sql{key}", label_visibility="collapsed",
+                     height=min(60 + 22 * current.count("\n"), 360))
+        if edit.get("error"):
+            st.error(edit["error"], icon=":material/error:")
+        run = back = st.container(horizontal=True, gap="small")
+        run.button("Run and save" if on_save else "Run", icon=":material/play_arrow:", key=f"run{key}",
+                   type="primary", on_click=run_edit, args=(key, on_save))
+        if edit.get("sql") or edit.get("error"):
+            back.button("Back to the original", icon=":material/undo:", key=f"back{key}",
+                        on_click=reset_edit, args=(key, sql))
+        st.caption("Read-only: one SELECT at a time. Downloads run the whole query, not just the rows shown.")
+        download_buttons(key, current, title, columns, rows)
+
+
 def show_result(run, question=None, key=None):
     import re
     text = re.sub(r"```sql.*?```", "", run["answer"] or "", flags=re.S | re.I).strip()   # SQL has its own expander
     md(text or "_No answer._")
+    sql, columns, rows = run.get("final_sql"), run.get("columns"), run.get("rows")
+    edit = edit_state(f"a{key}") if key is not None else {}
+    if edit.get("sql"):                                              # the user edited the query and ran it
+        st.html('<div class="edited">Showing your edited query - the answer above is about the original.</div>')
+        sql, columns, rows = edit["sql"], edit["columns"], edit["rows"]
     spec = None
-    if run.get("rows"):
-        spec = charts.check_spec(run.get("chart"), run["columns"]) or charts.auto_spec(run["columns"], run["rows"])
-        shown = chart_view(f"a{key}", spec, run["columns"], run["rows"], run.get("final_sql"))
+    if rows:
+        spec = charts.check_spec(run.get("chart"), columns) or charts.auto_spec(columns, rows)
+        shown = chart_view(f"a{key}" + (f"e{edit['version']}" if edit.get("sql") else ""), spec, columns, rows, sql)
         if shown:
             spec = shown                                            # pin what is on screen, chart type included
         else:
-            table(run["columns"], run["rows"])
+            table(columns, rows)
+    elif edit.get("sql"):
+        st.info("Your query ran and returned no rows.")
     if run.get("final_sql"):
-        with st.expander("SQL behind this answer"):
-            st.code(run["final_sql"], language="sql")
-    if key is not None and run.get("final_sql") and run.get("rows"):
-        pinned = any(i["sql"] == run["final_sql"].strip() for i in dash_items())
+        if key is not None:
+            sql_panel(f"a{key}", run["final_sql"], question or "result", columns or [], rows or [])
+        else:
+            with st.expander("SQL behind this answer"):
+                st.code(run["final_sql"], language="sql")
+    if key is not None and sql and rows:
+        pinned = any(i["sql"] == sql.strip() for i in dash_items())
         st.button("On the dashboard" if pinned else "Add to dashboard", key=f"pin{key}", disabled=pinned,
                   icon=":material/check:" if pinned else ":material/dashboard_customize:",
-                  on_click=pin, args=(question, run["final_sql"], spec or run.get("chart")))
+                  on_click=pin, args=(question, sql, spec or run.get("chart")))
     steps = len(run["steps"])
     st.html(f'<div class="meta">{run["model"]}, {steps} step{"s" if steps != 1 else ""}, '
             f'{run["seconds"]:.1f} s</div>')
@@ -474,6 +557,14 @@ def set_chart(item, spec):
     dash_save()
 
 
+def set_sql(item, sql):
+    """A query edited on a dashboard card replaces the card's query (it ran without error first)."""
+    item["sql"] = sql
+    dash_save()
+    run_item.clear()
+    st.toast("Query saved", icon=":material/check:")
+
+
 def unpin(item_id):
     items = dash_items()
     items[:] = [i for i in items if i["id"] != item_id]
@@ -542,10 +633,11 @@ def render_dashboard():
             elif not chart_view(f"d{item['id']}", res["spec"], res["columns"], res["rows"], item["sql"],
                                 height=260, tabs=False, on_type=lambda new, it=item: set_chart(it, new)):
                 table(res["columns"], res["rows"])
-            with st.expander("Table and SQL"):
+            with st.expander("Table"):
                 if not res["error"]:
                     table(res["columns"], res["rows"])
-                st.code(item["sql"], language="sql")
+            sql_panel(f"d{item['id']}", item["sql"], item["title"], res["columns"] or [], res["rows"] or [],
+                      on_save=lambda new, it=item: set_sql(it, new), label="SQL")
             card_controls(item)
 
 

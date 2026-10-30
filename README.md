@@ -103,6 +103,7 @@ python -m pytest tests         # 99 tests (3 need a PostgreSQL server), no API k
 | `upload.py` | Uploads on the web page: reading CSV/Excel, cleaning, building the session's database, describing it |
 | `sqlimport.py` | SQL scripts from any dialect into SQLite: splitting, translating, IDENTITY values, foreign keys, the guard |
 | `drill.py` | Drill-down: finds the next level in the data and rewrites the query for the clicked bar |
+| `exports.py` | Excel and CSV downloads of a whole query result |
 | `charts.py` · `dashboards.py` | Charts drawn from query rows (form, palette, marks); pinned dashboards and the HTML export |
 | `data/` | SQLite copies: Porsche (built by `setup/build_sqlite.py`) and the Chinook sample database |
 | `check_setup.py` · `setup/` · `SETUP.md` | Setup check, read-only user, SQLite builder, CSV importer, setup guide |
@@ -143,6 +144,13 @@ the clicked value added - joins, other filters and the measure untouched), so th
 that was clicked. The levels are found in the data: a column is the next level when its values nest inside the
 clicked one (100% of states sit in one region, 89% of cities in one state; a cross-cutting dimension like Segment
 appears in every region and is never offered). A breadcrumb row climbs back up. Works in the chat and on dashboards.
+
+**Edit the SQL, download the result.** Under every answer, the query opens for editing: change it and press
+**Run** – the chart and table redraw from your query (through the same read-only checks as the agent's), and
+**Back to the original** returns to the agent's. **Add to dashboard** pins the query on screen, edited or not. On a
+dashboard card, **Run and save** replaces the card's query. **Excel** and **CSV** download the whole result, run again
+at the moment of the click (not just the rows on screen); the Excel file has a second sheet with the query, and the
+CSV opens in Excel with Hebrew intact.
 
 **Dashboards.** **Add to dashboard** under any answer pins its query. The **Dashboard** view runs every pinned query
 again, live – headline numbers on top as stat tiles, charts below – with reorder, remove, refresh, and **Download
