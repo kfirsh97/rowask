@@ -64,15 +64,18 @@ def database_url() -> str:
     url = os.environ.get("DATABASE_URL", "").strip().strip("'\"")
     if url:
         return url
-    if os.environ.get("DB_USER"):
+    from dbprofile import load_profile
+    profile = load_profile()
+    if profile["name"] != "porsche" and profile.get("database_url"):
+        return profile["database_url"]          # DB_PROFILE=superstore means the Superstore file, even with DB_* set
+    if os.environ.get("DB_USER"):              # DB_* is the Porsche database on SQL Server (SETUP.md)
         user = quote_plus(os.environ["DB_USER"])
         password = quote_plus(os.environ.get("DB_PASSWORD", "").strip().strip("'\""))
         host = os.environ.get("DB_HOST", "localhost")
         port = os.environ.get("DB_PORT", "1433")
         name = os.environ.get("DB_NAME", "Porsche")
         return f"mssql+pymssql://{user}:{password}@{host}:{port}/{name}"
-    from dbprofile import load_profile
-    url = load_profile().get("database_url", "")
+    url = profile.get("database_url", "")
     if url:
         return url
     raise SetupError("No database configured. Set DATABASE_URL in .env (see SETUP.md), "

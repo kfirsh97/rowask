@@ -192,3 +192,15 @@ def test_sql_server_url_builds_without_connecting(monkeypatch):
     monkeypatch.setenv("DB_USER", "agent_reader")
     monkeypatch.setenv("DB_PASSWORD", "x")
     assert db.dialect() == "mssql" and "TOP n" in db.dialect_hint()
+
+
+def test_a_profile_with_its_own_file_wins_over_the_sql_server_settings(monkeypatch):
+    """DB_* in .env is the Porsche SQL Server; DB_PROFILE=superstore must still mean the Superstore file."""
+    monkeypatch.setenv("DB_USER", "agent_reader")
+    monkeypatch.setenv("DB_PASSWORD", "x")
+    monkeypatch.setenv("DB_PROFILE", "superstore")
+    dbprofile.load_profile.cache_clear()
+    assert db.database_url() == "sqlite:///data/superstore.sqlite"
+    monkeypatch.setenv("DB_PROFILE", "porsche")
+    dbprofile.load_profile.cache_clear()
+    assert db.database_url().startswith("mssql+pymssql://agent_reader")
