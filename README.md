@@ -85,6 +85,13 @@ DB_PROFILE=superstore python eval.py
 
 Every database can have its own key: copy `answer_keys/superstore.py` to `answer_keys/<profile>.py`. The checker
 accepts rounding (17.2 matches 17.2188) but not a different number (2.6 ≠ 2.7) or a fraction for a percentage.
+For a "which one is the highest" question, a sorted list whose first row is the answer counts (the agent often
+shows the top 3 for context). A number the agent worked out itself instead of in SQL does not count, even when it is
+right: the prompt asks for every stated number - percentage changes included - to come from the final query.
+
+First run (Claude Sonnet 5.5, 30 October 2026): **13 / 16, traps 8 / 9**. All three misses were right answers in the
+wrong shape: two ranked lists (top 3 states, all 12 months), which led to the ranked-list rule above, and one growth
+rate the model computed in its head from two yearly totals, which led to the compute-in-SQL rule in the prompt.
 
 ## Checking every answer
 

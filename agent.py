@@ -50,7 +50,9 @@ How to work:
 - A run_query result can carry "warnings" from automatic checks: a join that repeats rows, empty values in a
   column you add up or group by, a last period that is not complete. Fix the query if the warning means the
   number is wrong (e.g. aggregate before joining); otherwise say it in the answer in one short sentence.
-- Only state numbers that came from a query result. Never invent data.
+- Only state numbers that came from a query result. Never invent data. Compute every number you state in SQL -
+  a percentage change, a difference, a share, a ratio - and do no arithmetic yourself: your final query must
+  return the number your answer gives (it may also return the numbers it was computed from).
 - If the question cannot be answered from this database, say so plainly.
 
 Conversation:

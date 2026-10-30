@@ -100,3 +100,13 @@ def test_superstore_answer_key_scores_traps(monkeypatch, tmp_path):
     saved = json.loads(next(tmp_path.glob("*_superstore_*.json")).read_text(encoding="utf-8"))
     n, traps = len(superstore.QUESTIONS), sum(1 for q in superstore.QUESTIONS if q.get("trap"))
     assert saved["score"] == f"{n - 1}/{n}" and saved["traps"] == f"{traps - 1}/{traps}"
+
+
+def test_a_ranked_list_answers_a_which_is_highest_question():
+    assert evaluation.top_row_answers([("California",)], [("California", 457688), ("New York", 310876)],
+                                      "SELECT s, SUM(x) FROM t GROUP BY s ORDER BY 2 DESC LIMIT 3")
+    assert not evaluation.top_row_answers([("California",)], [("New York", 1), ("California", 2)],
+                                          "SELECT s, SUM(x) FROM t GROUP BY s ORDER BY 2 LIMIT 3")
+    assert not evaluation.top_row_answers([("California",)], [("California", 1), ("Texas", 2)],
+                                          "SELECT s, SUM(x) FROM t GROUP BY s")          # not sorted: no "top"
+    assert not evaluation.top_row_answers([(1,), (2,)], [(1,), (2,), (3,)], "SELECT 1 ORDER BY 1")

@@ -20,6 +20,7 @@ because it says nothing about the agent's reasoning.
 import argparse
 import json
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +29,13 @@ from compare import results_match
 import answer_keys
 
 RESULTS_DIR = Path(__file__).parent / "eval_results"
+
+
+def top_row_answers(expected, got, sql) -> bool:
+    """A "which one is the highest" question answered with a ranked list: the agent showed the top 3 states, or all
+    12 months by sales, and the first row is the answer. Accepted only for a one-row answer and a query that sorts."""
+    return len(expected) == 1 and len(got) > 1 and bool(re.search(r"\border\s+by\b", sql or "", re.I)) \
+        and results_match(expected, got[:1])
 
 
 def main():
@@ -105,15 +113,17 @@ def main():
         else:
             try:
                 _, got = run_query_all(r["final_sql"])
-                ok = results_match(expected, got)
-                rec.update(correct=ok, reason="" if ok else
+                ok, note = results_match(expected, got), ""
+                if not ok and top_row_answers(expected, got, r["final_sql"]):
+                    ok, note = True, f"answer in the first row of an ordered list of {len(got)}"
+                rec.update(correct=ok, note=note, reason="" if ok else
                            f"different result: expected {len(expected)} rows, agent returned {len(got)}")
             except Exception as e:
                 rec.update(correct=False, reason=f"agent SQL failed: {str(e)[:200]}")
         results.append(rec)
         mark = "PASS" if rec["correct"] else "FAIL"
         print(f"     {mark}  ({rec['steps']} tool calls, {rec['seconds']}s, {rec['model']})"
-              + (f" - {rec['reason']}" if rec["reason"] else ""))
+              + (f" - {rec['reason']}" if rec["reason"] else "") + (f" - {rec['note']}" if rec.get("note") else ""))
 
     correct = sum(1 for r in results if r["correct"] is True)
     errors = sum(1 for r in results if r["correct"] is None)
