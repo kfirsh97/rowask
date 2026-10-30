@@ -54,3 +54,18 @@ def test_large_results_are_fast():
     t = time.time()
     assert results_match([(r[0],) for r in rows], [(r[1], r[0], "x") for r in reversed(rows)])
     assert time.time() - t < 2
+
+
+def test_rounded_decimals_match_to_their_precision():
+    assert results_match([(17.21882697783464,)], [(17.2,)])
+    assert results_match([(17.21882697783464,)], [(17.22,)])
+    assert not results_match([(2.6141178035449184,)], [(2.7,)])
+
+
+def test_fraction_is_not_a_percentage():
+    assert not results_match([(17.21882697783464,)], [(0.1722,)])
+
+
+def test_numbers_written_as_text():
+    assert results_match([(12,)], [("12",)])
+    assert results_match([(2025, 613933.58)], [("2025", 613933.58)])

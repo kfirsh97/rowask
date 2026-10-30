@@ -171,5 +171,10 @@ def run_query(sql: str) -> dict:
     except Exception as e:            # SQL errors go back to the agent so it can fix its query
         return {"error": _clean_error(e)}
     truncated = len(rows) > MAX_ROWS
-    rows = [{c: _jsonable(v) for c, v in zip(cols, r)} for r in rows[:MAX_ROWS]]
-    return {"columns": cols, "rows": rows, "row_count": len(rows), "truncated": truncated}
+    out_rows = [{c: _jsonable(v) for c, v in zip(cols, r)} for r in rows[:MAX_ROWS]]
+    out = {"columns": cols, "rows": out_rows, "row_count": len(out_rows), "truncated": truncated}
+    import checks                     # silent-mistake checks: repeated rows from a join, empty values, a partial period
+    found = checks.warnings(sql, cols, rows[:MAX_ROWS] if not truncated else [])
+    if found:
+        out["warnings"] = found
+    return out

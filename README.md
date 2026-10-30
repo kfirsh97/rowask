@@ -73,6 +73,36 @@ difference between the two rows is a signal, not proof — repeated runs and mor
 
 Results with full details are saved in `eval_results/`.
 
+**A second answer key, built around traps: Superstore.** 16 questions on the public Superstore sales sample
+(`answer_keys/superstore.py`, SQLite), 9 of them traps - questions where a wrong query still runs and returns a
+plausible number: counting order lines as orders, customers by name (804 IDs carry 800 names), an average of
+ratios instead of a ratio of sums, the US when the table also holds Canada, "at least one" without DISTINCT.
+The score reports the traps separately.
+
+```
+DB_PROFILE=superstore python eval.py
+```
+
+Every database can have its own key: copy `answer_keys/superstore.py` to `answer_keys/<profile>.py`. The checker
+accepts rounding (17.2 matches 17.2188) but not a different number (2.6 ≠ 2.7) or a fraction for a percentage.
+
+## Checking every answer
+
+The answer key measures the agent; these checks run on **every answer**, on the database itself, no model call
+(`checks.py`):
+
+- **Joins that repeat rows.** When the answer adds up a table joined to another on a column that repeats there
+  (orders joined to payments on the order ID), each order is counted once per payment. Flagged with the count of
+  repeated values.
+- **Empty values** in a column the answer adds up or groups by - SUM and AVG skip them without a word.
+- **An incomplete last period.** If the rows the query can see end on 14 December, December is not a full month,
+  and its "drop" is an artifact. Flagged when that period is in the result.
+
+The agent gets the warnings together with its query result and fixes the query or mentions them; the page shows
+them under the answer, with a quiet line for the checks that passed. The agent also states its **assumptions** in one
+line (which date, what counts as an order, filters it added), shown in its own box - the choices a reviewer
+would otherwise have to dig out of the SQL.
+
 ## Run it
 
 **Full step-by-step setup, from an empty Mac to a running chat: [SETUP.md](SETUP.md)**
@@ -87,7 +117,7 @@ pip install -r requirements.txt
 cp .env.example .env           # add your API key and the read-only user's password
 python check_setup.py          # DB connection, read-only check, API key check
 python -m streamlit run app.py # web chat on http://localhost:8501
-python -m pytest tests         # 99 tests (3 need a PostgreSQL server), no API key needed
+python -m pytest tests         # 123 tests (3 need a PostgreSQL server), no API key needed
 ```
 
 ## Files
@@ -96,7 +126,8 @@ python -m pytest tests         # 99 tests (3 need a PostgreSQL server), no API k
 |---|---|
 | `agent.py` | The agent loop, prompt, providers, retries and logging |
 | `tools.py` | `get_schema`, `run_query`, the SQL safety validator and the business notes |
-| `eval.py` · `eval_questions.py` · `compare.py` | Answer key, evaluation runner and result comparison |
+| `eval.py` · `answer_keys/` · `compare.py` | Answer keys (Porsche: `eval_questions.py`; Superstore), the evaluation runner and result comparison |
+| `checks.py` | Automatic checks on every answer: joins that repeat rows, empty values, incomplete periods |
 | `app.py` | The web chat (Streamlit) |
 | `db.py` | Connects to any database (SQLAlchemy); read-only sessions, 30-second query limit, dialect hints for the model |
 | `dbprofile.py` · `profiles/` | Per-database knowledge: business line, notes, example questions |

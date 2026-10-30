@@ -76,3 +76,27 @@ def test_overload_is_error_not_wrong_answer(monkeypatch, tmp_path):
     assert saved["provider_errors"] == 1
     assert saved["score"] == "0/0"
     assert saved["results"][0]["correct"] is None
+
+
+def test_superstore_answer_key_scores_traps(monkeypatch, tmp_path):
+    """The Superstore key runs on the real SQLite file: right queries pass, the classic wrong one fails."""
+    from answer_keys import superstore
+    monkeypatch.setenv("DB_PROFILE", "superstore")
+    monkeypatch.delenv("DB_USER")
+    dbprofile.load_profile.cache_clear()
+    gold = {q["question"]: q["expected_sql"] for q in superstore.QUESTIONS}
+
+    def fake_ask(question, verbose=False, provider=None):
+        sql = gold[question]
+        if question == superstore.QUESTIONS[0]["question"]:          # order lines counted as orders
+            sql = "SELECT COUNT(*) FROM superstore WHERE strftime('%Y', Order_Date) = '2025'"
+        return {"final_sql": sql, "answer": "", "steps": [], "seconds": 0.1, "model": "fake"}
+
+    monkeypatch.setattr(agent, "ask", fake_ask)
+    monkeypatch.setattr(evaluation.time, "sleep", lambda s: None)
+    monkeypatch.setattr(evaluation, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["eval.py", "--pause", "0"])
+    evaluation.main()
+    saved = json.loads(next(tmp_path.glob("*_superstore_*.json")).read_text(encoding="utf-8"))
+    n, traps = len(superstore.QUESTIONS), sum(1 for q in superstore.QUESTIONS if q.get("trap"))
+    assert saved["score"] == f"{n - 1}/{n}" and saved["traps"] == f"{traps - 1}/{traps}"

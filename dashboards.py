@@ -51,7 +51,8 @@ def run(item: dict) -> dict:
     except Exception as e:
         return {"columns": [], "rows": [], "spec": None, "error": str(getattr(e, "orig", None) or e)[:300]}
     spec = charts.check_spec(item.get("chart"), cols) or charts.auto_spec(cols, rows)
-    return {"columns": cols, "rows": rows, "spec": spec, "error": None}
+    import checks
+    return {"columns": cols, "rows": rows, "spec": spec, "error": None, "checks": checks.run(item["sql"], cols, rows)}
 
 
 # ------------------------------------------------------------------ the standalone page

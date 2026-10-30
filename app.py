@@ -9,6 +9,7 @@ import contextvars
 import glob
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -16,7 +17,9 @@ from pathlib import Path
 
 import streamlit as st
 
+import answer_keys
 import charts
+import checks
 import dashboards
 import db
 import drill
@@ -120,6 +123,11 @@ st.html("""
 }
 [class*="st-key-sql"] textarea { font: .82rem/1.5 var(--mono); }
 .meta { color: var(--steel); font-size: .86rem; font-variant-numeric: tabular-nums; }
+.assume { color: var(--steel); font-size: .88rem; line-height: 1.5; margin: -.2rem 0 .6rem; }
+.assume b { color: var(--slate); font-weight: 600; }
+.check-warn { border-left: 3px solid var(--signal); background: var(--paper); padding: .35rem .7rem; margin: .1rem 0 .45rem;
+  color: var(--slate); font-size: .88rem; line-height: 1.45; }
+.check-ok { color: var(--steel); font-size: .82rem; margin: 0 0 .5rem; }
 .edited { border-left: 3px solid var(--oak); padding: .3rem .7rem; background: var(--paper); color: var(--slate); font-size: .88rem; margin: .2rem 0 .6rem; }
 .demo-note { border-left: 3px solid var(--signal); padding: .4rem .7rem; background: var(--paper); color: var(--slate); font-size: .9rem; margin-bottom: 1rem; }
 
@@ -158,15 +166,16 @@ if UPLOAD:
 
 
 # ------------------------------------------------------------------ sidebar
-def latest_score():
-    files = sorted(glob.glob(str(HERE / "eval_results" / "*notes-on.json")))
-    if not files:
-        return None
-    try:
-        data = json.loads(Path(files[-1]).read_text(encoding="utf-8"))
-        return data["score"], data.get("avg_seconds"), data.get("models_used", [])
-    except Exception:
-        return None
+def latest_score(profile):
+    """The last scored run of this profile's answer key (results saved by eval.py), or None."""
+    for f in sorted(glob.glob(str(HERE / "eval_results" / "*notes-on.json")), reverse=True):
+        try:
+            data = json.loads(Path(f).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if data.get("profile", "porsche") == profile:            # older runs predate other answer keys
+            return data["score"], data.get("traps"), data.get("models_used", [])
+    return None
 
 
 with st.sidebar:
@@ -191,12 +200,18 @@ with st.sidebar:
                    else f"{db.describe()} · profile: {PROFILE['name']}")
     except Exception as e:
         st.caption(f"Not connected: {e}")
-    if PROFILE["answer_key"]:
+    key = None if (DEMO or UPLOAD) else answer_keys.load(PROFILE["name"])
+    if key:
         st.markdown("#### Answer key")
-        score = latest_score() or ("12/12", 10.0, ["claude-sonnet-5-5"])
-        st.html(f'<div class="score"><b>{score[0]}</b><span>questions correct</span></div>')
-        st.caption("Scored against 12 business questions with known answers, by running the agent's SQL "
-                   "on SQL Server and comparing the full result.")
+        n = len(key[1])
+        score = latest_score(PROFILE["name"]) or (("12/12", None, []) if PROFILE["name"] == "porsche" else None)
+        if score:
+            st.html(f'<div class="score"><b>{score[0]}</b><span>questions correct</span></div>')
+            st.caption(f"Scored against {n} business questions with known answers, by running the agent's SQL "
+                       "and comparing the full result." + (f" Trap questions: {score[1]}." if score[1] else ""))
+        else:
+            st.caption(f"{n} questions with known answers, {sum(1 for q in key[1] if q.get('trap'))} of them traps. "
+                       "Not scored yet: run `python eval.py`.")
     st.markdown("#### Safety")
     st.caption("Read-only connection. Only single SELECT queries reach the database, each stopped after "
                "30 seconds. At most 8 steps per question.")
@@ -387,7 +402,8 @@ def run_edit(key, on_save=None):
         on_save(sql)
         edits.pop(key, None)
     else:
-        edits[key] = {"sql": sql, "columns": cols, "rows": rows, "version": edits.get(key, {}).get("version", 0) + 1}
+        edits[key] = {"sql": sql, "columns": cols, "rows": rows, "checks": checks.run(sql, cols, rows),
+                      "version": edits.get(key, {}).get("version", 0) + 1}
 
 
 def reset_edit(key, original):
@@ -438,15 +454,31 @@ def sql_panel(key, sql, title, columns, rows, on_save=None, label="SQL behind th
         download_buttons(key, current, title, columns, rows)
 
 
+def show_checks(found):
+    """Automatic checks on the query behind the result: warnings stand out, passed checks are one quiet line."""
+    bad = [c for c in found if not c["ok"]]
+    for c in bad:
+        st.html(f'<div class="check-warn"><b>Check:</b> {esc(c["text"])}</div>')
+    good = [c["text"] for c in found if c["ok"]]
+    if good:
+        st.html(f'<div class="check-ok">Checked: {esc(" · ".join(good))}</div>')
+
+
 def show_result(run, question=None, key=None):
     import re
     text = re.sub(r"```sql.*?```", "", run["answer"] or "", flags=re.S | re.I).strip()   # SQL has its own expander
+    text, assumptions = checks.split_assumptions(text)
     md(text or "_No answer._")
+    if assumptions:
+        st.html(f'<div class="assume" dir="auto"><b>{esc(assumptions[0])}</b> {esc(assumptions[1])}</div>')
     sql, columns, rows = run.get("final_sql"), run.get("columns"), run.get("rows")
+    found = run.get("checks") or []
     edit = edit_state(f"a{key}") if key is not None else {}
     if edit.get("sql"):                                              # the user edited the query and ran it
         st.html('<div class="edited">Showing your edited query - the answer above is about the original.</div>')
         sql, columns, rows = edit["sql"], edit["columns"], edit["rows"]
+        found = edit.get("checks") or []
+    show_checks(found)
     spec = None
     if rows:
         spec = charts.check_spec(run.get("chart"), columns) or charts.auto_spec(columns, rows)
@@ -513,6 +545,7 @@ def run_live(question, status, live, history, job):
     if r.get("final_sql"):
         try:
             rec["columns"], rec["rows"] = run_query_all(r["final_sql"], max_rows=500)
+            rec["checks"] = checks.run(r["final_sql"], rec["columns"], rec["rows"])
         except Exception:
             pass
     return rec
@@ -628,6 +661,7 @@ def render_dashboard():
         res = results[item["id"]]
         with cols[k % 2], st.container(border=True):
             st.html(f'<div class="dash-title">{esc(item["title"])}</div>')
+            show_checks([c for c in res.get("checks") or [] if not c["ok"]])   # on a card: warnings only
             if res["error"]:
                 st.error(f"This query no longer runs: {res['error']}")
             elif not chart_view(f"d{item['id']}", res["spec"], res["columns"], res["rows"], item["sql"],

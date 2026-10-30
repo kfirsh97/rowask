@@ -1,10 +1,13 @@
-"""Stage 4-5: measure the agent against the answer key.
+"""Stage 4-5: measure the agent against the answer key of the active profile (answer_keys/<profile>.py).
 
 For each question: run the agent, take the SQL it used, run that SQL and the expected SQL,
 and compare the full results (see compare.py). Prints a score and saves every detail.
+Porsche (SQL Server): 12 questions from the original project. Superstore (SQLite): 16 questions, half of them
+traps - questions where a wrong query still returns a plausible number.
 
 Run:
-  python eval.py                      all 12 questions, with schema notes, current PROVIDER
+  python eval.py                      every question, with schema notes, current PROVIDER
+  DB_PROFILE=superstore python eval.py   the Superstore answer key
   python eval.py --notes off          same, without the business notes (the "before" score)
   python eval.py --ids 1,8,11         only some questions
   python eval.py --provider claude    choose the provider for this run
@@ -22,7 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 from compare import results_match
-from eval_questions import QUESTIONS
+import answer_keys
 
 RESULTS_DIR = Path(__file__).parent / "eval_results"
 
@@ -39,10 +42,16 @@ def main():
     os.environ["SCHEMA_NOTES"] = args.notes        # read by tools.get_schema() on every call
     import db
     from dbprofile import load_profile
-    if not load_profile()["answer_key"] or db.dialect() != "mssql":
-        raise SystemExit("The answer key (eval_questions.py) is written in T-SQL for the Porsche database on "
-                         f"SQL Server; the agent is now on {db.describe()} with profile '{load_profile()['name']}'. "
-                         "Run the evaluation with the SQL Server settings from SETUP.md.")
+    profile = load_profile()["name"]
+    key = answer_keys.load(profile)
+    if key is None:
+        raise SystemExit(f"Profile '{profile}' has no answer key. Write one: copy answer_keys/superstore.py to "
+                         f"answer_keys/{profile}.py and fill in questions with known answers.")
+    dialect, QUESTIONS = key
+    if db.dialect() != dialect:
+        where = "SQL Server - see SETUP.md" if dialect == "mssql" else dialect
+        raise SystemExit(f"The '{profile}' answer key is written for {where}; the agent is now on {db.describe()}. "
+                         "Run the evaluation on the database the key was written for.")
     import agent
     from agent import _is_temporary
     if args.model:
@@ -60,7 +69,8 @@ def main():
         if n > 1:
             time.sleep(args.pause)
         print(f"[{q['id']:>2}] {q['question'][:70]}...")
-        rec = {"id": q["id"], "question": q["question"], "expected_sql": q["expected_sql"].strip()}
+        rec = {"id": q["id"], "question": q["question"], "expected_sql": q["expected_sql"].strip(),
+               "trap": q.get("trap")}
         try:
             _, expected = run_query_all(q["expected_sql"])
         except Exception as e:
@@ -109,12 +119,15 @@ def main():
     errors = sum(1 for r in results if r["correct"] is None)
     answered = len(results) - errors
     timed = [r for r in results if "seconds" in r]
+    traps = [r for r in results if r.get("trap") and r["correct"] is not None]
     summary = {
         "time": datetime.now().isoformat(timespec="seconds"),
+        "profile": profile,
         "provider": args.provider,
         "schema_notes": args.notes,
         "score": f"{correct}/{answered}",
         "accuracy": round(correct / answered, 3) if answered else 0,
+        "traps": f"{sum(1 for r in traps if r['correct'])}/{len(traps)}" if traps else None,
         "provider_errors": errors,
         "models_used": sorted({r["model"] for r in results if r.get("model")}),
         "avg_tool_calls": round(sum(r["steps"] for r in timed) / len(timed), 1) if timed else None,
@@ -122,11 +135,12 @@ def main():
         "results": results,
     }
     RESULTS_DIR.mkdir(exist_ok=True)
-    out = RESULTS_DIR / f"{datetime.now():%Y%m%d-%H%M}_{args.provider}_notes-{args.notes}.json"
+    out = RESULTS_DIR / f"{datetime.now():%Y%m%d-%H%M}_{profile}_{args.provider}_notes-{args.notes}.json"
     out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"\nSCORE: {correct}/{answered} correct ({summary['accuracy']:.0%})"
           f" | avg {summary['avg_tool_calls']} tool calls, {summary['avg_seconds']}s per question"
+          + (f"\nTrap questions: {summary['traps']} correct" if traps else "")
           + (f"\n{errors} question(s) not scored - provider overloaded. Rerun them with --ids" if errors else ""))
     print(f"Details saved to {out}")
 

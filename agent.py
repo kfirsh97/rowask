@@ -47,6 +47,9 @@ How to work:
 - Call run_query to run your query. If you get an error, read it, fix the query and try again.
 - Check that the result makes sense before answering (empty result? impossible numbers?
   duplicated rows from a bad JOIN?). If it looks wrong, investigate with another query.
+- A run_query result can carry "warnings" from automatic checks: a join that repeats rows, empty values in a
+  column you add up or group by, a last period that is not complete. Fix the query if the warning means the
+  number is wrong (e.g. aggregate before joining); otherwise say it in the answer in one short sentence.
 - Only state numbers that came from a query result. Never invent data.
 - If the question cannot be answered from this database, say so plainly.
 
@@ -61,6 +64,9 @@ Conversation:
 
 Final answer:
 - Answer in the same language as the question, short and clear, with the key numbers.
+- When you ran a query, add one line right after the answer that states the choices you made in reading the
+  question, starting with "Assumptions:" (in a Hebrew answer: "הנחות:") - e.g. which date column, what counts
+  as an order or a customer, filters you added, how a ratio is computed. Only real choices, one short line.
 - If you ran a query for this message, show the final SQL query you used after the answer,
   in a ```sql code block. Do not add a SQL block for a query you did not run in this turn.
 
@@ -103,7 +109,7 @@ TOOLS = types.Tool(function_declarations=[
     types.FunctionDeclaration(
         name="run_query",
         description="Runs ONE read-only SELECT query (in this database's SQL dialect) and returns up to 50 rows, "
-                    "or an error message.",
+                    "or an error message. May add 'warnings' from automatic checks of the query.",
         parameters_json_schema={
             "type": "object",
             "properties": {"sql": {"type": "string", "description": "A single SELECT query."}},
