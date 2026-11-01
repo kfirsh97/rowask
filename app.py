@@ -343,6 +343,22 @@ with st.sidebar:
                    else f"{db.describe()} · profile: {PROFILE['name']}")
     except Exception as e:
         st.caption(f"Not connected: {e}")
+    if not DEMO:
+        try:
+            import metrics
+            ms, broken = metrics.checked(PROFILE)
+        except Exception as e:
+            ms, broken = [], [("metric dictionary", str(e))]
+        if ms or broken:
+            st.markdown("#### Metric dictionary")
+            st.caption(f"{len(ms)} agreed definition{'s' if len(ms) != 1 else ''} the agent must use, so the same "
+                       "question always gets the same number.")
+            with st.expander("See the definitions"):
+                for m in ms:
+                    st.markdown(f"**{plain(esc(m['name']))}** - {plain(esc(m['definition']))}")
+                    st.code(metrics.probe_sql(m).replace(" AS value", ""), language="sql", wrap_lines=True)
+            for name, err in broken:
+                st.warning(plain(f"{name} was left out - it doesn't run on this database: {err}"))
     key = None if (DEMO or UPLOAD) else answer_keys.load(PROFILE["name"])
     if key:
         st.markdown("#### Answer key")

@@ -154,7 +154,7 @@ python agent.py                                            # interactive chat, r
 ```bash
 python -m pytest tests     # no database or API key needed
 python eval.py             # scores the agent on 12 questions with known answers (SQL Server)
-DB_PROFILE=superstore python eval.py   # 16 questions on the Superstore sample, 9 of them traps
+DB_PROFILE=superstore python eval.py   # 19 questions on the Superstore sample: traps and metric-dictionary questions
 ```
 
 ## Your own database

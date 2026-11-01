@@ -36,3 +36,31 @@ notes = """
 - Customers.FOLLOW / COMMENTS: how many listings the customer follows / comments they wrote.
 - Ages: a car's age in years = the current year minus CARS.YEAR.
 """
+
+# The metric dictionary (metrics.py): one agreed definition per business number. Written in SQL that both SQL Server
+# and SQLite run, since the profile serves both.
+[[metrics]]
+name = "Revenue"
+definition = "Total sale price of the cars sold, in US dollars, by sale date."
+sql = "SUM(Sold_Price)"
+table = "Sales"
+date = "Sold_Date"
+unit = "USD"
+aliases = ["sales income", "total sales", "הכנסות", "סך המכירות"]
+
+[[metrics]]
+name = "Cars sold"
+definition = "Number of sales - one row in Sales is one car sold."
+sql = "COUNT(*)"
+table = "Sales"
+date = "Sold_Date"
+aliases = ["number of sales", "sales count", "מספר מכירות", "כמה מכירות"]
+
+[[metrics]]
+name = "Average sale price"
+definition = "Revenue divided by cars sold."
+sql = "AVG(Sold_Price)"
+table = "Sales"
+date = "Sold_Date"
+unit = "USD"
+aliases = ["average price", "מחיר ממוצע", "מחיר מכירה ממוצע"]

@@ -26,6 +26,7 @@ DEFAULTS = {
     "examples": [],
     "database_url": "",
     "answer_key": False,       # True only where eval_questions.py has the answer key for this database
+    "metrics": [],             # the metric dictionary: [[metrics]] tables, see metrics.py
     "drill": [],               # optional drill-down levels, e.g. [["Region", "State_Province", "City"]] -
                                # without it, the levels are found in the data (drill.py)
 }
@@ -66,4 +67,9 @@ def _load(name: str) -> dict:
     unknown = set(data) - set(DEFAULTS)
     if unknown:
         raise ValueError(f"{path.name}: unknown setting(s) {', '.join(sorted(unknown))}")
+    import metrics
+    try:
+        metrics.parse(data.get("metrics"))
+    except ValueError as e:
+        raise ValueError(f"{path.name}: {e}") from None
     return {**DEFAULTS, "name": path.stem, **data}

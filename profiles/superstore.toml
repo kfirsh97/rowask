@@ -31,3 +31,56 @@ notes = """
 - Product_ID is not unique to one product name (a few IDs carry 2 names) - group by Product_Name for product questions.
 - Postal_Code is text; some US ZIP codes lost their leading zero in the source (4 digits instead of 5).
 """
+
+# The metric dictionary (metrics.py): one agreed definition per business number.
+[[metrics]]
+name = "Revenue"
+definition = "Sales after discount, in US dollars."
+sql = "SUM(Sales)"
+table = "superstore"
+date = "Order_Date"
+unit = "USD"
+aliases = ["sales", "total sales", "הכנסות", "מכירות", "סך המכירות"]
+
+[[metrics]]
+name = "Orders"
+definition = "Number of distinct orders - an order has one row per product, so never COUNT(*)."
+sql = "COUNT(DISTINCT Order_ID)"
+table = "superstore"
+date = "Order_Date"
+aliases = ["number of orders", "order count", "הזמנות", "מספר הזמנות"]
+
+[[metrics]]
+name = "Profit margin"
+definition = "Total profit as a percentage of total sales - a ratio of sums, never an average of row margins."
+sql = "100.0 * SUM(Profit) / SUM(Sales)"
+table = "superstore"
+date = "Order_Date"
+unit = "%"
+aliases = ["margin", "שולי רווח", "אחוז רווח"]
+
+[[metrics]]
+name = "Average order value"
+definition = "Revenue divided by the number of distinct orders."
+sql = "SUM(Sales) / COUNT(DISTINCT Order_ID)"
+table = "superstore"
+date = "Order_Date"
+unit = "USD"
+aliases = ["AOV", "ערך הזמנה ממוצע", "ממוצע להזמנה"]
+
+[[metrics]]
+name = "Active customers"
+definition = "Customers (by Customer_ID) with at least one order in the last 90 days of the data - counted back from the latest order date in the table, not from today."
+sql = "COUNT(DISTINCT Customer_ID)"
+table = "superstore"
+filter = "Order_Date > date((SELECT MAX(Order_Date) FROM superstore), '-90 days')"
+aliases = ["active clients", "לקוחות פעילים"]
+
+[[metrics]]
+name = "Late shipment rate"
+definition = "Share of orders shipped more than 4 days after the order date, as a percentage of all orders."
+sql = "100.0 * COUNT(DISTINCT CASE WHEN julianday(Ship_Date) - julianday(Order_Date) > 4 THEN Order_ID END) / COUNT(DISTINCT Order_ID)"
+table = "superstore"
+date = "Order_Date"
+unit = "%"
+aliases = ["late shipments", "late deliveries", "משלוחים מאוחרים", "שיעור איחורים"]

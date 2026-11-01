@@ -155,7 +155,7 @@ def get_schema(tables=None) -> str:
     and (unless SCHEMA_NOTES=off) the business notes from the profile.
     On a large database, the first call lists the tables only; call again with `tables` for their columns."""
     notes = notes_enabled()
-    key = (db.database_url(), notes, tuple(sorted(t.lower() for t in tables)) if tables else None)
+    key = (db.database_url(), load_profile()["name"], notes, tuple(sorted(t.lower() for t in tables)) if tables else None)
     if key in _schema_cache:
         return _schema_cache[key]
     insp = inspect(db.engine())
@@ -187,6 +187,11 @@ def get_schema(tables=None) -> str:
     profile_notes = load_profile()["notes"].strip()
     if notes and profile_notes:
         lines += ["", "COLUMN NOTES (business meaning):", profile_notes]
+    if notes and not tables:                      # once per conversation, with the full schema or the table list
+        import metrics
+        ms, _ = metrics.checked(load_profile())
+        if ms:
+            lines += ["", metrics.describe(ms)]
     _schema_cache[key] = "\n".join(lines)
     return _schema_cache[key]
 

@@ -18,7 +18,8 @@ an SQL course project, which is still its main benchmark (12/12 on questions wit
 - **Edit the SQL** behind any answer and rerun it; download the whole result as **Excel or CSV**
 - **Checks on every answer**: joins that repeat rows, empty values, incomplete periods; the agent's assumptions
   shown in one line
-- **Answer keys** that measure accuracy, including trap questions: 12/12 on Porsche, 16/16 on the Superstore sample
+- **A metric dictionary**: one agreed definition per business number, used on every question
+- **Answer keys** that measure accuracy, including trap questions: 12/12 on Porsche, 16/16 on the first 16 Superstore questions
 
 ```
 $ python agent.py "כמה מכירות היו בכל שנה?"
@@ -93,8 +94,8 @@ difference between the two rows is a signal, not proof — repeated runs and mor
 
 Results with full details are saved in `eval_results/`.
 
-**A second answer key, built around traps: Superstore.** 16 questions on the public Superstore sales sample
-(`answer_keys/superstore.py`, SQLite), 9 of them traps - questions where a wrong query still runs and returns a
+**A second answer key, built around traps: Superstore.** 19 questions on the public Superstore sales sample
+(`answer_keys/superstore.py`, SQLite), 10 of them traps - questions where a wrong query still runs and returns a
 plausible number: counting order lines as orders, customers by name (804 IDs carry 800 names), an average of
 ratios instead of a ratio of sums, the US when the table also holds Canada, "at least one" without DISTINCT.
 The score reports the traps separately.
@@ -120,6 +121,24 @@ rate the model computed in its head from two yearly totals, which led to the com
 
 The growth rate is now computed in SQL, and both ranked lists count. One run of 16 questions is a signal, not proof;
 the key is there to be rerun after every change.
+
+## The metric dictionary
+
+"Revenue", "active customer", "late shipment" - every business has its own definitions, and a model can't guess
+them: by order date or ship date? the last 90 days of the data or of the calendar? A profile defines each metric
+once (`[[metrics]]` in `profiles/*.toml`, see `metrics.py`): the expression, table, date column, filter, and the
+words people use for it, in any language. The agent gets the dictionary with the schema, must compute a named
+metric exactly that way, and says which definition it used. Every metric is run against the database when first
+shown; one that doesn't run is left out and reported, so a typo can't hand the agent a broken definition. The
+sidebar lists them.
+
+This is what the warehouse tools call a semantic model, and their accuracy depends on it. To measure it here,
+the Superstore answer key has three metric questions (17-19) whose answers follow the dictionary:
+
+```
+DB_PROFILE=superstore python eval.py --notes on    # with the dictionary
+DB_PROFILE=superstore python eval.py --notes off   # without it: the "before" score
+```
 
 ## Checking every answer
 

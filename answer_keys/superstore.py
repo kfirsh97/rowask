@@ -1,6 +1,6 @@
 """Answer key for the Superstore sample (profile: superstore, SQLite).
 
-16 questions with known answers. About half are traps - the questions where a query runs, returns a
+19 questions with known answers. About half are traps - the questions where a query runs, returns a
 plausible number, and is wrong:
   - order lines vs orders: one order has several rows (COUNT(*) is not the number of orders)
   - customers by ID: 804 customer IDs carry 800 names (counting names undercounts)
@@ -9,6 +9,11 @@ plausible number, and is wrong:
   - the US only, when the table also holds Canada
 
 Each question says what to return, so there is one right answer. Months and years are numbers.
+
+Questions 17-19 ask for business metrics by name. Their answers follow the metric dictionary in
+profiles/superstore.toml (an "active customer" ordered in the last 90 days of the data; a shipment is late after
+4 days) - definitions no model can guess, so they measure whether the agent uses the dictionary. Run
+`eval.py --notes off` to see the score without it.
 """
 DIALECT = "sqlite"
 
@@ -75,4 +80,15 @@ QUESTIONS = [
      "expected_sql": """SELECT COUNT(*) FROM (
             SELECT Customer_ID FROM superstore WHERE strftime('%Y', Order_Date) = '2025'
             INTERSECT SELECT Customer_ID FROM superstore WHERE strftime('%Y', Order_Date) = '2026')"""},
+    {"id": 17, "metric": "Active customers",
+     "question": "How many active customers do we have?",
+     "expected_sql": """SELECT COUNT(DISTINCT Customer_ID) FROM superstore
+                        WHERE Order_Date > date((SELECT MAX(Order_Date) FROM superstore), '-90 days')"""},
+    {"id": 18, "metric": "Late shipment rate",
+     "question": "מה שיעור המשלוחים המאוחרים?",
+     "expected_sql": """SELECT 100.0 * COUNT(DISTINCT CASE WHEN julianday(Ship_Date) - julianday(Order_Date) > 4
+                        THEN Order_ID END) / COUNT(DISTINCT Order_ID) FROM superstore"""},
+    {"id": 19, "metric": "Average order value", "trap": "average of orders, not of lines",
+     "question": "What is the average order value in each segment? Return the segment and the value.",
+     "expected_sql": "SELECT Segment, SUM(Sales) / COUNT(DISTINCT Order_ID) FROM superstore GROUP BY Segment"},
 ]

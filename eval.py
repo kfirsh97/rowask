@@ -78,7 +78,7 @@ def main():
             time.sleep(args.pause)
         print(f"[{q['id']:>2}] {q['question'][:70]}...")
         rec = {"id": q["id"], "question": q["question"], "expected_sql": q["expected_sql"].strip(),
-               "trap": q.get("trap")}
+               "trap": q.get("trap"), "metric": q.get("metric")}
         try:
             _, expected = run_query_all(q["expected_sql"])
         except Exception as e:
@@ -130,6 +130,7 @@ def main():
     answered = len(results) - errors
     timed = [r for r in results if "seconds" in r]
     traps = [r for r in results if r.get("trap") and r["correct"] is not None]
+    by_metric = [r for r in results if r.get("metric") and r["correct"] is not None]
     summary = {
         "time": datetime.now().isoformat(timespec="seconds"),
         "profile": profile,
@@ -138,6 +139,7 @@ def main():
         "score": f"{correct}/{answered}",
         "accuracy": round(correct / answered, 3) if answered else 0,
         "traps": f"{sum(1 for r in traps if r['correct'])}/{len(traps)}" if traps else None,
+        "metric_questions": f"{sum(1 for r in by_metric if r['correct'])}/{len(by_metric)}" if by_metric else None,
         "provider_errors": errors,
         "models_used": sorted({r["model"] for r in results if r.get("model")}),
         "avg_tool_calls": round(sum(r["steps"] for r in timed) / len(timed), 1) if timed else None,
@@ -151,6 +153,7 @@ def main():
     print(f"\nSCORE: {correct}/{answered} correct ({summary['accuracy']:.0%})"
           f" | avg {summary['avg_tool_calls']} tool calls, {summary['avg_seconds']}s per question"
           + (f"\nTrap questions: {summary['traps']} correct" if traps else "")
+          + (f"\nMetric-dictionary questions: {summary['metric_questions']} correct" if by_metric else "")
           + (f"\n{errors} question(s) not scored - provider overloaded. Rerun them with --ids" if errors else ""))
     print(f"Details saved to {out}")
 
