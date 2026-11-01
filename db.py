@@ -158,7 +158,12 @@ def fetch(sql: str, max_rows: int):
         if isinstance(inner, sqlite3.Connection):
             _sqlite_deadlines[id(inner)] = time.monotonic() + QUERY_TIMEOUT_S
         cur = raw.cursor()
-        cur.execute(sql)
+        if type(inner).__module__.split(".")[0] == "psycopg":
+            # PostgreSQL (psycopg 3): a prepared statement holds exactly one command, so the server itself refuses
+            # a second one - a layer that does not depend on validate_query reading the SQL the way the server does.
+            cur.execute(sql, prepare=True)
+        else:
+            cur.execute(sql)
         cols = [d[0] for d in cur.description] if cur.description else []
         rows = cur.fetchmany(max_rows) if cur.description else []
         return cols, [tuple(r) for r in rows]

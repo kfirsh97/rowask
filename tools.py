@@ -60,6 +60,10 @@ def validate_query(sql: str):
         tokens = _tokens(sql)
     except Exception:
         return "Could not read the query."
+    if "\\" in sql and _sql_dialect() in ("postgres", "mysql"):
+        # Backslashes are read differently by server versions and settings (MySQL's escapes, PostgreSQL's E'' strings,
+        # and before version 15 even 1e'\\'' became one): refused rather than guessed at. A SELECT rarely needs one.
+        return "Backslashes are not allowed in queries on this database."
     if any(c.lstrip().startswith(("!", "+")) for t in tokens for c in t.comments):
         return "Executable comments are not allowed."          # MySQL runs /*! ... */; optimizer hints /*+ ... */
     while tokens and tokens[-1].token_type.name == "SEMICOLON":

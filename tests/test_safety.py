@@ -47,6 +47,10 @@ def test_blocked(sql):
     ("SELECT '--'; COMMIT; DELETE FROM Sales", "postgresql"),        # a comment marker inside a string
     ("SELECT 'a\\'', 1; DROP TABLE t", "mysql"),                   # MySQL's backslash-escaped quote
     ("SELECT 1 /*! ; DROP TABLE t */", "mysql"),                    # MySQL runs /*! ... */
+    ("SELECT 1e'\\''; DELETE FROM t --'", "postgresql"),             # PostgreSQL 14 and older read an E'' string
+    ("SELECT 1 /* /* */ ' */; DELETE FROM t", "postgresql"),        # nested comments
+    ("SELECT 1 /* /* */ ' */; DELETE FROM t", "mssql"),
+    ("SELECT ARRAY[1][1]; DELETE FROM t", "postgresql"),
 ])
 def test_tricks_that_hide_a_second_statement_are_blocked(sql, dialect, monkeypatch):
     monkeypatch.setattr(tools.db, "dialect", lambda: dialect)

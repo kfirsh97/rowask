@@ -204,3 +204,11 @@ def test_a_profile_with_its_own_file_wins_over_the_sql_server_settings(monkeypat
     monkeypatch.setenv("DB_PROFILE", "porsche")
     dbprofile.load_profile.cache_clear()
     assert db.database_url().startswith("mssql+pymssql://agent_reader")
+
+
+@pg
+def test_postgres_server_refuses_a_second_statement_itself(monkeypatch):
+    """Even if a second statement got past validate_query, the prepared statement holds one command only."""
+    use(monkeypatch, profile="generic", url=POSTGRES)
+    with pytest.raises(Exception, match="multiple commands|cannot insert multiple"):
+        db.fetch("SELECT 1; SELECT 2", 5)
