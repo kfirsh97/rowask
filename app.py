@@ -711,14 +711,57 @@ for n, item in enumerate(st.session_state.history):
                 st.html(trace_html(item["run"]["steps"]))
         show_result(item["run"], question=item["question"], key=f"{st.session_state.get('chat_id', 0)}-{n}")
 
+# A public demo spends the owner's API credit: cap questions per visitor and per day (off unless set in the env).
+SESSION_LIMIT = int(os.environ.get("QUESTION_LIMIT", "0") or 0)
+DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "0") or 0)
+
+
+@st.cache_resource
+def daily_counter():
+    return {"day": None, "n": 0, "lock": threading.Lock()}
+
+
+def limit_reached():
+    """A reason the next question can't be asked, or None. Only real (not demo) runs count."""
+    if DEMO:
+        return None
+    if SESSION_LIMIT and st.session_state.get("asked", 0) >= SESSION_LIMIT:
+        return (f"This demo answers {SESSION_LIMIT} questions per visit, and they are used up. To keep going, run RowAsk "
+                "on your own computer with your own API key - it takes a few minutes (see the source code on GitHub).")
+    if DAILY_LIMIT:
+        c = daily_counter()
+        with c["lock"]:
+            if c["day"] != time.strftime("%Y-%m-%d"):
+                c["day"], c["n"] = time.strftime("%Y-%m-%d"), 0
+            if c["n"] >= DAILY_LIMIT:
+                return "The demo has answered all the questions it can today. Try again tomorrow, or run RowAsk yourself."
+    return None
+
+
+def count_question():
+    st.session_state.asked = st.session_state.get("asked", 0) + 1
+    if DAILY_LIMIT:
+        c = daily_counter()
+        with c["lock"]:
+            c["n"] += 1
+
+
+blocked = limit_reached()
+if SESSION_LIMIT and not DEMO and not blocked:
+    left = SESSION_LIMIT - st.session_state.get("asked", 0)
+    st.caption(f"Public demo: {left} of {SESSION_LIMIT} questions left in this visit.")
+if blocked:
+    st.info(blocked, icon=":material/hourglass_empty:")
+
 picked = None
-if EXAMPLES and not st.session_state.history:   # examples only start a chat; after that, the user just keeps talking
+if EXAMPLES and not st.session_state.history and not blocked:   # examples only start a chat; after that, the user just keeps talking
     picked = st.pills("Try a question", EXAMPLES, key=f"pick{st.session_state.get('chat_id', 0)}")
 typed = st.chat_input("Ask a follow-up, or a new question" if st.session_state.history
-                      else "Ask a question about the data, in Hebrew or English")
-question = typed or picked
+                      else "Ask a question about the data, in Hebrew or English", disabled=bool(blocked))
+question = None if blocked else (typed or picked)
 
 if question:
+    count_question()
     with st.chat_message("user", avatar=":material/person:"):
         md(question)
     with st.chat_message("assistant", avatar=":material/database:"):

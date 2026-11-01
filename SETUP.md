@@ -221,6 +221,20 @@ columns of the tables it needs. On PostgreSQL it reads the `public` schema. The 
 (`eval.py`) is written for the Porsche database on SQL Server – for your own database, write your own questions
 and expected queries to measure it.
 
+## Free public demo (Streamlit Community Cloud)
+
+1. At share.streamlit.io, sign in with GitHub and deploy `https://github.com/kfirsh97/rowask/blob/main/app.py`
+   (Python 3.12).
+2. Under **Advanced settings → Secrets**, paste (TOML: values in quotes, numbers without):
+   ```toml
+   PROVIDER = "claude"
+   ANTHROPIC_API_KEY = "your-key"
+   QUESTION_LIMIT = 10
+   DAILY_LIMIT = 200
+   ```
+   No database settings: the demo runs on the SQLite copy of Porsche, and visitors can upload their own files.
+3. Set a monthly spend limit for the key in the Anthropic Console, so a busy day can't cost more than you chose.
+
 ## Troubleshooting
 
 | You see | What to do |
