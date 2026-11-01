@@ -906,8 +906,13 @@ if blocked:
     st.info(blocked, icon=":material/hourglass_empty:")
 
 picked = None
-if EXAMPLES and not st.session_state.history and not blocked:   # examples only start a chat; after that, the user just keeps talking
-    picked = st.pills("Try a question", EXAMPLES, key=f"pick{st.session_state.get('chat_id', 0)}")
+# Suggested questions stay under the conversation; the ones already asked drop out. The key changes with every
+# answer, so a picked suggestion is asked once and the row comes back unselected.
+asked = {h["question"] for h in st.session_state.history}
+left = [q for q in EXAMPLES if q not in asked]
+if left and not blocked:
+    picked = st.pills("More questions to try" if st.session_state.history else "Try a question", left,
+                      key=f"pick{st.session_state.get('chat_id', 0)}-{len(st.session_state.history)}")
 typed = st.chat_input("Ask a follow-up, or a new question" if st.session_state.history
                       else "Ask a question about the data, in Hebrew or English", disabled=bool(blocked))
 question = None if blocked else (typed or picked)
