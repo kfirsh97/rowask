@@ -63,8 +63,25 @@ def sync_upload():
 if not DEMO:
     sync_upload()
 UPLOAD = st.session_state.get("upload")
-db.SESSION_URL.set(UPLOAD.url if UPLOAD else None)                 # this session only - see db.py
-dbprofile.SESSION_PROFILE.set(UPLOAD.profile if UPLOAD else None)
+# Sample databases a visitor can open from the home page (SQLite files in data/, read-only).
+SAMPLES = {
+    "porsche": ("Porsche car sales", "18 tables · 58,339 rows",
+                "Sales, cars, customers, sellers, insurance and service - an SQL course project normalized to 3NF. "
+                "The agent scores 12/12 on its answer key."),
+    "chinook": ("Digital music store", "11 tables · 15,600 rows",
+                "Artists, albums, tracks, customers and invoices - the public Chinook sample database."),
+}
+SAMPLE = st.session_state.get("sample") if not UPLOAD else None
+# A database set up in .env (DATABASE_URL, DB_* or DB_PROFILE) is offered on the home page too.
+CONFIGURED = any(os.environ.get(k) for k in ("DATABASE_URL", "DB_USER", "DB_PROFILE"))
+if UPLOAD:
+    db.SESSION_URL.set(UPLOAD.url); dbprofile.SESSION_PROFILE.set(UPLOAD.profile)   # this session only - see db.py
+elif SAMPLE:
+    _sample = dbprofile.load_profile(SAMPLE)
+    db.SESSION_URL.set(_sample["database_url"]); dbprofile.SESSION_PROFILE.set(_sample)
+else:
+    db.SESSION_URL.set(None); dbprofile.SESSION_PROFILE.set(None)
+HOME = not DEMO and not UPLOAD and not SAMPLE and not st.session_state.get("use_configured")
 
 try:
     PROFILE = load_profile("porsche" if DEMO else None)      # the recorded demo runs are on Porsche
@@ -74,7 +91,7 @@ except Exception as e:                                        # bad DB_PROFILE: 
 EXAMPLES = PROFILE["examples"]
 
 BRAND = "RowAsk"
-st.set_page_config(page_title=f"{BRAND} · {PROFILE['title']}", page_icon="🏁", layout="centered")
+st.set_page_config(page_title=BRAND if HOME else f"{BRAND} · {PROFILE['title']}", page_icon="🏁", layout="centered")
 
 # ------------------------------------------------------------------ look
 # Palette taken from period Porsche paint: Chalk (ground), Slate Grey (ink), Oak Green Metallic (accent),
@@ -129,6 +146,9 @@ st.html("""
   color: var(--slate); font-size: .88rem; line-height: 1.45; }
 .check-ok { color: var(--steel); font-size: .82rem; margin: 0 0 .5rem; }
 .edited { border-left: 3px solid var(--oak); padding: .3rem .7rem; background: var(--paper); color: var(--slate); font-size: .88rem; margin: .2rem 0 .6rem; }
+.home-about { color: var(--steel); font-size: .9rem; line-height: 1.45; margin: .4rem 0 .2rem; min-height: 4.2rem; }
+.home-steps { color: var(--slate); padding-left: 1.2rem; line-height: 1.55; }
+.home-steps li { margin-bottom: .35rem; }
 .demo-note { border-left: 3px solid var(--signal); padding: .4rem .7rem; background: var(--paper); color: var(--slate); font-size: .9rem; margin-bottom: 1rem; }
 
 .score { display: flex; align-items: baseline; gap: .5rem; }
@@ -145,6 +165,83 @@ st.html("""
 .rtl ul, .rtl ol { padding-right: 1.4rem; padding-left: 0; }
 </style>
 """)
+
+def uploader():
+    st.file_uploader("Upload CSV, Excel, SQL scripts or a SQLite database", type=UPLOAD_TYPES,
+                     accept_multiple_files=True, key=f"files{st.session_state.get('upload_gen', 0)}", disabled=DEMO,
+                     help="CSV and Excel are cleaned (column names, dates, numbers, codes). SQL scripts - CREATE TABLE "
+                          "and INSERT, from SQL Server, MySQL, PostgreSQL or SQLite - are run in order of file name. "
+                          "Everything is loaded into a database for this browser session only.")
+
+
+def open_sample(name):
+    st.session_state.sample = name
+    st.session_state.history, st.session_state.chat_id = [], st.session_state.get("chat_id", 0) + 1
+
+
+def use_configured():
+    st.session_state.use_configured = True
+    st.session_state.history, st.session_state.chat_id = [], st.session_state.get("chat_id", 0) + 1
+
+
+def go_home():
+    """Back to the home page: drop the upload (and empty the uploader), the sample and the conversation."""
+    old = st.session_state.pop("upload", None)
+    if old:
+        uploads.remove(old)
+    for k in ("sample", "use_configured", "upload_error"):
+        st.session_state.pop(k, None)
+    st.session_state.upload_gen = st.session_state.get("upload_gen", 0) + 1
+    st.session_state.upload_sig = ()
+    st.session_state.history, st.session_state.chat_id = [], st.session_state.get("chat_id", 0) + 1
+    st.session_state.drill, st.session_state.edits = {}, {}
+
+
+if HOME:
+    st.html(f"""
+<div class="brand">
+<div class="wordmark">{BRAND}</div>
+<h1>Ask your data in plain language</h1>
+<div class="redline" aria-hidden="true"></div>
+<p>Upload a spreadsheet or a database and ask questions in Hebrew or English. RowAsk writes the SQL, checks its own
+result, charts it, and shows the query behind every answer - so every number can be verified.</p>
+</div>
+""")
+    st.markdown("#### Upload your data")
+    uploader()
+    if st.session_state.get("upload_error"):
+        st.error(st.session_state.upload_error)
+    st.caption("CSV and Excel files are cleaned on the way in (column names, dates, numbers, codes); SQL scripts from "
+               "SQL Server, MySQL, PostgreSQL or SQLite are translated and loaded. Your files stay in this browser "
+               "session and are gone when you leave.")
+    st.markdown("#### Or try a sample database")
+    cards = list(SAMPLES.items())
+    if CONFIGURED:
+        try:
+            cards.append(("__configured", ("Your connected database", db.describe(), "The database set up in .env "
+                                           f"(profile: {dbprofile.profile_name()}).")))
+        except Exception as e:
+            st.caption(f"The database in .env is not reachable: {e}")
+    for col, (name, (title, size, about)) in zip(st.columns(len(cards), gap="medium"), cards):
+        with col, st.container(border=True):
+            st.html(f'<div class="dash-title">{esc(title)}</div><div class="stat-caption">{esc(size)}</div>'
+                    f'<p class="home-about">{esc(about)}</p>')
+            if name == "__configured":
+                st.button("Open", key="open-configured", icon=":material/arrow_forward:", on_click=use_configured)
+            else:
+                st.button("Explore", key=f"open-{name}", icon=":material/arrow_forward:", on_click=open_sample,
+                          args=(name,))
+    st.markdown("#### How it works")
+    st.html("""<ol class="home-steps">
+<li><b>Ask</b> a business question, then follow up ("and in 2023?", "only the West").</li>
+<li><b>The agent</b> reads the schema, writes and runs one read-only SELECT at a time, and fixes its own errors.</li>
+<li><b>You check it</b>: the SQL behind every answer (editable), automatic checks for duplicated rows, missing values
+and partial periods, charts with drill-down, and Excel/CSV downloads.</li></ol>""")
+    with st.sidebar:
+        st.markdown("#### RowAsk")
+        st.caption("Pick your data on the page to start. Uploads stay in this browser session only.")
+        st.markdown("[Source code on GitHub](https://github.com/kfirsh97/rowask)")
+    st.stop()
 
 st.html(f"""
 <div class="brand">
@@ -186,14 +283,11 @@ with st.sidebar:
     notes = st.toggle("Business notes in the schema", value=True, disabled=DEMO, key="notes",
                       help="Currency, units and value formats the raw schema cannot tell the model.")
     st.markdown("#### Your data")
-    st.file_uploader("Upload CSV, Excel, SQL scripts or a SQLite database", type=UPLOAD_TYPES,
-                     accept_multiple_files=True, key=f"files{st.session_state.get('upload_gen', 0)}", disabled=DEMO,
-                     help="CSV and Excel are cleaned (column names, dates, numbers, codes). SQL scripts - CREATE TABLE "
-                          "and INSERT, from SQL Server, MySQL, PostgreSQL or SQLite - are run in order of file name. "
-                          "Everything is loaded into a database for this browser session only. Remove the files "
-                          "to go back to the default database.")
+    uploader()
     if st.session_state.get("upload_error"):
         st.error(st.session_state.upload_error)
+    if not DEMO:
+        st.button("Choose other data", icon=":material/home:", on_click=go_home, key="go-home")
     st.markdown("#### Database")
     try:
         st.caption("Recorded runs - no database connected" if DEMO

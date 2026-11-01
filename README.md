@@ -8,6 +8,8 @@ an SQL course project, which is still its main benchmark (12/12 on questions wit
 
 **What it does**
 
+- **A home page** to upload your own files or open a sample database (Porsche sales, a music store)
+
 - **Chat** with follow-up questions, in a Streamlit web page or on the command line
 - **Any database**, with a small profile file for what the data means; or **upload** CSV, Excel, SQL scripts, SQLite
 - **Charts** drawn from the real rows (bar, line, pie, US and world maps, heatmap...), a chart-type switcher, and
