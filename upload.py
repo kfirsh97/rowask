@@ -88,6 +88,31 @@ def _decode(data: bytes) -> tuple:
     return data.decode("cp1252", errors="replace"), "windows-1252"
 
 
+def _separators(text: str) -> list:
+    """Column separators to try, best first. Each candidate splits the first rows the way pandas will (quotes
+    respected, so a description full of commas or a tags column like "a"|"b"|"c" doesn't fool it); the best one
+    gives every row the header's number of columns, and more than one column. csv.Sniffer guessed '|' on such files."""
+    sample = text[:300_000]
+    sample = sample[:sample.rfind("\n")] if "\n" in sample else sample     # don't judge a row cut in half
+    scores = []
+    for sep in (",", ";", "\t", "|"):
+        try:
+            rows = []
+            for row in csv.reader(io.StringIO(sample), delimiter=sep):
+                if row:
+                    rows.append(len(row))
+                if len(rows) >= 300:
+                    break
+        except csv.Error:
+            continue
+        if not rows or rows[0] < 2:
+            continue
+        same = sum(1 for n in rows if n == rows[0]) / len(rows)
+        scores.append((same, rows[0], sep))
+    ranked = [sep for _, _, sep in sorted(scores, reverse=True)]
+    return ranked + [s for s in (",", ";", "\t", "|") if s not in ranked]
+
+
 def read_tables(name: str, data: bytes) -> tuple:
     """Return ({table_name: raw DataFrame}, note about how it was read). Text files are read as all-text
     columns, so nothing (like a leading zero) is lost before cleaning decides each column's type."""
@@ -95,11 +120,15 @@ def read_tables(name: str, data: bytes) -> tuple:
     stem = clean_name(Path(name).stem) or "data"
     if ext in (".csv", ".txt", ".tsv"):
         text, encoding = _decode(data)
-        try:
-            sep = "\t" if ext == ".tsv" else csv.Sniffer().sniff(text[:20_000], delimiters=",;\t|").delimiter
-        except csv.Error:
-            sep = ","
-        df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False, skip_blank_lines=True)
+        tried, df = [], None
+        for sep in (["\t"] if ext == ".tsv" else _separators(text)):
+            try:
+                df = pd.read_csv(io.StringIO(text), sep=sep, dtype=str, keep_default_na=False, skip_blank_lines=True)
+                break
+            except pd.errors.ParserError as e:
+                tried.append(f"{ {',': 'comma', ';': 'semicolon', chr(9): 'tab', '|': 'pipe'}[sep]}: {e}")
+        if df is None:
+            raise ValueError(f"{name}: could not read the rows into columns - " + "; ".join(tried))
         shown = {",": "comma", ";": "semicolon", "\t": "tab", "|": "pipe"}.get(sep, sep)
         return {stem: df}, f"{name}: read as {encoding} text, {shown}-separated"
     if ext in (".xlsx", ".xlsm", ".xls"):

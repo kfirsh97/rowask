@@ -159,3 +159,12 @@ def test_a_script_that_never_ends_is_stopped(tmp_path, monkeypatch):
               "INSERT INTO t WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT x FROM c;\n")
     with pytest.raises(ValueError, match="took longer than 1 seconds"):
         upload.build([("loop.sql", script.encode())], tmp_path / "up")
+
+
+def test_tags_with_pipes_do_not_fool_the_separator(tmp_path):
+    """A YouTube-style export: a tags column like "a"|"b"|"c" made csv.Sniffer pick '|' and the read fail."""
+    rows = ["video_id,title,tags,views,description"] + [
+        f'v{i},"Title, part {i}","funny"|"vlog"|"best of",{1000 + i},"Links: http://a.b, http://c.d | follow; more"'
+        for i in range(300)]
+    up = upload.build([("USvideos.csv", "\n".join(rows).encode())], tmp_path / "up")
+    assert up.tables == {"USvideos": 300} and "comma-separated" in up.report[0]
