@@ -16,7 +16,7 @@ an SQL course project, which is still its main benchmark (12/12 on questions wit
 - **Edit the SQL** behind any answer and rerun it; download the whole result as **Excel or CSV**
 - **Checks on every answer**: joins that repeat rows, empty values, incomplete periods; the agent's assumptions
   shown in one line
-- **Answer keys** that measure accuracy, including trap questions (13/16 then 2 fixes on the Superstore sample)
+- **Answer keys** that measure accuracy, including trap questions: 12/12 on Porsche, 16/16 on the Superstore sample
 
 ```
 $ python agent.py "כמה מכירות היו בכל שנה?"
@@ -105,6 +105,14 @@ right: the prompt asks for every stated number - percentage changes included - t
 First run (Claude Sonnet 5.5, 30 October 2026): **13 / 16, traps 8 / 9**. All three misses were right answers in the
 wrong shape: two ranked lists (top 3 states, all 12 months), which led to the ranked-list rule above, and one growth
 rate the model computed in its head from two yearly totals, which led to the compute-in-SQL rule in the prompt.
+
+| Run (Claude Sonnet 5.5) | Score | Trap questions | Avg tool calls | Avg time |
+|---|---|---|---|---|
+| 30 Oct 2026 – first run | 13 / 16 | 8 / 9 | 2.1 | 6.8 s |
+| 1 Nov 2026 – after the two fixes | **16 / 16** | **9 / 9** | 2.1 | 5.6 s |
+
+The growth rate is now computed in SQL, and both ranked lists count. One run of 16 questions is a signal, not proof;
+the key is there to be rerun after every change.
 
 ## Checking every answer
 
