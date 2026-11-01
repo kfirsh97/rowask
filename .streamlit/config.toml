@@ -8,7 +8,7 @@ font = "sans serif"
 
 [server]
 headless = true
-maxUploadSize = 25        # MB per file: enough for real spreadsheets, not enough to tie up a free server
+maxUploadSize = 100       # MB per file. A big CSV takes several times its size in memory while it is cleaned
 
 [browser]
 gatherUsageStats = false

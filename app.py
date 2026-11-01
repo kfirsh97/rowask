@@ -50,11 +50,14 @@ def _limit(name):
     try:
         return max(int(raw), 0)
     except ValueError:
-        safe = {"QUESTION_LIMIT": 10, "DAILY_LIMIT": 200}[name]
+        safe = {"QUESTION_LIMIT": 10, "DAILY_LIMIT": 200, "MAX_UPLOAD_MB": 25}[name]
         print(f"{name}={raw!r} is not a whole number - using {safe}.")
         return safe
 
 
+# Upload size: the uploader allows 100 MB (.streamlit/config.toml); MAX_UPLOAD_MB can set a lower limit for one server.
+# A 100 MB CSV needs about 1.5 GB of memory while it is cleaned - more than a small free server may have.
+MAX_UPLOAD_MB = _limit("MAX_UPLOAD_MB") or 100
 PUBLIC = bool(_limit("QUESTION_LIMIT") or _limit("DAILY_LIMIT"))
 UPLOAD_TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "xls", "sql", "sqlite", "sqlite3", "db"]
 
@@ -87,6 +90,11 @@ def sync_upload():
     st.session_state.history = []                                   # new data, new conversation
     st.session_state.dash_upload = []                               # and an empty dashboard for it
     st.session_state.chat_id = st.session_state.get("chat_id", 0) + 1
+    too_big = [f.name for f in files if f.size > MAX_UPLOAD_MB * 1_000_000]
+    if too_big:
+        st.session_state.upload_error = (f"{', '.join(too_big)}: over {MAX_UPLOAD_MB} MB, the limit here. "
+                                         "Remove it, or upload a smaller extract.")
+        return
     if files:
         try:
             with st.spinner("Loading your files - a large SQL script can take a few seconds..."):
@@ -253,7 +261,7 @@ result, charts it, and shows the query behind every answer - so every number can
     st.caption("CSV and Excel files are cleaned on the way in (column names, dates, numbers, codes); SQL scripts from "
                "SQL Server, MySQL, PostgreSQL or SQLite are translated and loaded. Your files stay in this browser "
                "session and are deleted afterwards. The AI model sees column names and query results, so don't "
-               "upload personal or confidential data to this public demo. Up to 25 MB per file.")
+               f"upload personal or confidential data to this public demo. Up to {MAX_UPLOAD_MB} MB per file.")
     st.markdown("#### Or try a sample database")
     cards = list(SAMPLES.items())
     if CONFIGURED:
