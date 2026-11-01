@@ -34,6 +34,8 @@ HERE = Path(__file__).parent
 def esc(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 DEMO = os.environ.get("DEMO", "").lower() in ("1", "true", "yes")
+# A public demo (question limits set): nothing a visitor does is written to the shared server, e.g. dashboards.
+PUBLIC = any(os.environ.get(k, "0") not in ("", "0") for k in ("QUESTION_LIMIT", "DAILY_LIMIT"))
 UPLOAD_TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "xls", "sql", "sqlite", "sqlite3", "db"]
 
 
@@ -176,8 +178,8 @@ st.html("""
 .stat-value { font-size: 2rem; font-weight: 600; color: var(--slate); line-height: 1.2; }
 .stat-caption { color: var(--steel); font-size: .78rem; unicode-bidi: plaintext; }
 .dash-title { font-weight: 600; color: var(--slate); unicode-bidi: plaintext; text-align: start; margin-bottom: .3rem; }
-.rtl, .rtl p, .rtl li { direction: rtl; text-align: right; unicode-bidi: normal; }
-.rtl ul, .rtl ol { padding-right: 1.4rem; padding-left: 0; }
+.rtl, .rtl p, .rtl li, [class*="st-key-rtl-"] p, [class*="st-key-rtl-"] li { direction: rtl; text-align: right; unicode-bidi: normal; }
+.rtl ul, .rtl ol, [class*="st-key-rtl-"] ul, [class*="st-key-rtl-"] ol { padding-right: 1.4rem; padding-left: 0; }
 </style>
 """)
 
@@ -361,14 +363,15 @@ def is_hebrew(text):
     return False
 
 
-HTML_TAG = re.compile(r"</?[A-Za-z][^>]*>")
-
-
 def md(text):
     """Markdown that flips to right-to-left (bullets included) when the text is Hebrew."""
     if is_hebrew(text):
         # The wrapper div needs HTML on; the text itself must not carry any (it can come from uploaded data)
-        st.markdown(f'<div class="rtl">\n\n{HTML_TAG.sub("", text)}\n\n</div>', unsafe_allow_html=True)
+        # Right-to-left by a CSS rule on a keyed container - no HTML rendering at all, so nothing in the text
+        # (which can come from uploaded data) can become markup.
+        st.session_state["_rtl_n"] = st.session_state.get("_rtl_n", 0) + 1
+        with st.container(key=f"rtl-{st.session_state['_rtl_n']}"):
+            st.markdown(text)
     else:
         st.markdown(text)
 
@@ -678,9 +681,12 @@ def abandon(job):
 
 # ------------------------------------------------------------------ dashboard
 def dash_items() -> list:
-    """This database's dashboard: saved on this computer per profile; for an upload, kept in this session only."""
+    """This database's dashboard: saved on this computer per profile. For an upload, and on the public demo
+    (where the server is shared by strangers), kept in this browser session only."""
     if UPLOAD:
         return st.session_state.setdefault("dash_upload", [])
+    if PUBLIC:
+        return st.session_state.setdefault("dash_public", {}).setdefault(PROFILE["name"], [])
     store = st.session_state.setdefault("dash", {})
     if PROFILE["name"] not in store:
         store[PROFILE["name"]] = dashboards.load(PROFILE["name"])
@@ -688,7 +694,7 @@ def dash_items() -> list:
 
 
 def dash_save():
-    if not UPLOAD and not DEMO:
+    if not UPLOAD and not DEMO and not PUBLIC:
         dashboards.save(PROFILE["name"], dash_items())
 
 

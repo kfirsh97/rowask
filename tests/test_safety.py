@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import tools  # noqa: E402
 from tools import validate_query  # noqa: E402
 
 ALLOWED = [
@@ -40,3 +41,18 @@ def test_allowed(sql):
 @pytest.mark.parametrize("sql", BLOCKED)
 def test_blocked(sql):
     assert validate_query(sql) is not None
+
+
+@pytest.mark.parametrize("sql, dialect", [
+    ("SELECT '--'; COMMIT; DELETE FROM Sales", "postgresql"),        # a comment marker inside a string
+    ("SELECT 'a\\'', 1; DROP TABLE t", "mysql"),                   # MySQL's backslash-escaped quote
+    ("SELECT 1 /*! ; DROP TABLE t */", "mysql"),                    # MySQL runs /*! ... */
+])
+def test_tricks_that_hide_a_second_statement_are_blocked(sql, dialect, monkeypatch):
+    monkeypatch.setattr(tools.db, "dialect", lambda: dialect)
+    assert validate_query(sql) is not None
+
+
+def test_names_and_strings_that_look_like_keywords_are_fine(monkeypatch):
+    monkeypatch.setattr(tools.db, "dialect", lambda: "mssql")
+    assert validate_query("SELECT [Delete Date], N'drop' FROM t -- update later") is None

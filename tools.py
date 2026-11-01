@@ -36,29 +36,46 @@ _schema_cache = {}
 
 # ---------------------------------------------------------------- safety
 
-def _strip_comments_and_strings(sql: str) -> str:
-    """Remove comments and string literals, so keywords hidden inside them are ignored
-    (a customer named 'Drop' must not be blocked) and keywords hidden in comments are caught."""
-    sql = re.sub(r"--[^\n]*", " ", sql)
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
-    sql = re.sub(r"N?'(?:[^']|'')*'", "''", sql)
-    return sql
+def _sql_dialect():
+    """The sqlglot dialect of the connected database, for reading a query exactly as the server will."""
+    try:
+        from drill import DIALECTS
+        return DIALECTS.get(db.dialect(), None)
+    except Exception:
+        return None
+
+
+def _tokens(sql: str):
+    """The query as the server reads it, in one left-to-right pass: strings, quoted names and comments are each
+    recognised once, by the dialect's own rules (a '--' inside a string is text; in MySQL '\\'' is an escaped quote)."""
+    from sqlglot.dialects.dialect import Dialect
+    return Dialect.get_or_raise(_sql_dialect()).tokenize(sql)
 
 
 def validate_query(sql: str):
     """Return None if the query is allowed, otherwise a short reason why not."""
     if not sql or not sql.strip():
         return "Empty query."
-    clean = _strip_comments_and_strings(sql).strip().rstrip(";").strip()
-    if ";" in clean:
+    try:
+        tokens = _tokens(sql)
+    except Exception:
+        return "Could not read the query."
+    if any(c.lstrip().startswith(("!", "+")) for t in tokens for c in t.comments):
+        return "Executable comments are not allowed."          # MySQL runs /*! ... */; optimizer hints /*+ ... */
+    while tokens and tokens[-1].token_type.name == "SEMICOLON":
+        tokens = tokens[:-1]
+    if not tokens:
+        return "Empty query."
+    if any(t.token_type.name == "SEMICOLON" for t in tokens):
         return "Only one statement is allowed."
-    first = clean.split(None, 1)[0].lower()
-    if first not in ("select", "with"):
+    if tokens[0].text.lower() not in ("select", "with"):
         return "Only SELECT queries are allowed."
-    lowered = clean.lower()
+    # Keywords only count outside strings and quoted names: a customer named 'Drop' or a column "Delete Date" is fine.
+    words = " ".join("''" if t.token_type.name.endswith("STRING") else
+                     '"x"' if t.token_type.name == "IDENTIFIER" else t.text for t in tokens).lower()
     for word in FORBIDDEN:
         pattern = rf"\b{re.escape(word)}" if word.endswith("_") else rf"\b{re.escape(word)}\b"
-        if re.search(pattern, lowered):
+        if re.search(pattern, words):
             return f"Forbidden keyword: {word.upper()}"
     return None
 
