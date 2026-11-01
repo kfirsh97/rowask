@@ -196,6 +196,7 @@ st.html("""
 .home-steps { color: var(--slate); padding-left: 1.2rem; line-height: 1.55; }
 .home-steps li { margin-bottom: .35rem; }
 .ai-note { color: var(--steel); font-size: .78rem; text-align: center; margin: .6rem 0 -.4rem; }
+.analysis-title { font-weight: 600; color: var(--slate); margin: .4rem 0 .3rem; }
 .demo-note { border-left: 3px solid var(--signal); padding: .4rem .7rem; background: var(--paper); color: var(--slate); font-size: .9rem; margin-bottom: 1rem; }
 
 .score { display: flex; align-items: baseline; gap: .5rem; }
@@ -630,6 +631,39 @@ def show_checks(found):
         st.html(f'<div class="check-ok">Checked: {esc(" · ".join(good))}</div>')
 
 
+def show_analysis(result):
+    """The numbers behind an analysis answer: a forecast chart with its range, or the test's table."""
+    kind = result["kind"]
+    label = {"forecast": f"Forecast - {result.get('method', '')}", "compare_groups": "Comparing groups",
+             "correlation": "Correlation", "outliers": "Unusual values"}[kind]
+    st.html(f'<div class="analysis-title">{esc(label)}</div>')
+    for w in result.get("warnings") or []:
+        st.html(f'<div class="check-warn"><b>Note:</b> {esc(w)}</div>')
+    if kind == "forecast":
+        st.altair_chart(charts.style(charts.forecast_chart(result)), width="stretch", theme=None)
+        table(["Period", "Forecast", "Low (95%)", "High (95%)"],
+              [(r["period"], r["forecast"], r["low"], r["high"]) for r in result["forecast"]])
+    elif kind == "compare_groups":
+        table(["Group", "Rows", "Mean", "Median", "Std dev"],
+              [(g["group"], g["n"], g["mean"], g["median"], g["std"]) for g in result["groups"]])
+        names = {"welch_t_test_p": "Welch t-test", "mann_whitney_p": "Mann-Whitney", "cohens_d": "Cohen's d",
+                 "alexander_govern_p": "Alexander-Govern", "anova_p": "ANOVA", "kruskal_wallis_p": "Kruskal-Wallis"}
+        parts = [f"{names.get(k, k)} {'d' if k == 'cohens_d' else 'p'} = "
+                 f"{v:.2f}" if k == "cohens_d" else
+                 f"{names.get(k, k)} {'p < 0.001' if v < 0.001 else f'p = {v:.3f}'}" for k, v in result["tests"].items()]
+        st.caption(" · ".join(p.replace(" d = ", " = ") for p in parts) +
+                   (" - significant at the 5% level" if result["significant"] else " - not significant at the 5% level"))
+    elif kind == "correlation":
+        st.caption(f"Pearson r = {result['pearson_r']:.3f} (p = {result['pearson_p']:.3g}) · Spearman rho = "
+                   f"{result['spearman_rho']:.3f} · {result['n']:,} rows. Moving together is not causing.")
+    else:
+        st.caption(f"Typical {result['value']}: {result['median']:,} · rule: {result['rule']} · "
+                   f"{result['count']} of {result['rows']:,} rows unusual")
+        if result["unusual"]:
+            table([result["label"], result["value"], "High / low", "Score"],
+                  [(u["label"], u["value"], u["direction"], u["score"]) for u in result["unusual"]])
+
+
 def show_result(run, question=None, key=None):
     import re
     text = re.sub(r"```sql.*?```", "", run["answer"] or "", flags=re.S | re.I).strip()   # SQL has its own expander
@@ -646,7 +680,14 @@ def show_result(run, question=None, key=None):
         found = edit.get("checks") or []
     show_checks(found)
     spec = None
-    if rows:
+    result = None if edit.get("sql") else run.get("analysis_result")
+    if result:
+        show_analysis(result)
+    if result and result["kind"] == "correlation" and rows:            # the two numbers against each other
+        out = charts.build({"type": "scatter", "x": result["x"], "y": result["y"]}, columns, rows[:2000])
+        if out is not None and not isinstance(out, tuple):
+            st.altair_chart(charts.style(out), width="stretch", theme=None)
+    if rows and not result:            # an analysis shows its own view; its raw rows are in the SQL panel downloads
         spec = charts.check_spec(run.get("chart"), columns) or charts.auto_spec(columns, rows)
         shown = chart_view(f"a{key}" + (f"e{edit['version']}" if edit.get("sql") else ""), spec, columns, rows, sql)
         if shown:
@@ -661,7 +702,7 @@ def show_result(run, question=None, key=None):
         else:
             with st.expander("SQL behind this answer"):
                 st.code(run["final_sql"], language="sql")
-    if key is not None and sql and rows:
+    if key is not None and sql and rows and not result:       # an analysis's raw rows make no dashboard card
         pinned = any(i["sql"] == sql.strip() for i in dash_items())
         st.button("On the dashboard" if pinned else "Add to dashboard", key=f"pin{key}", disabled=pinned,
                   icon=":material/check:" if pinned else ":material/dashboard_customize:",
@@ -714,6 +755,10 @@ def run_live(question, status, live, history, job):
             rec["checks"] = checks.run(r["final_sql"], rec["columns"], rec["rows"])
         except Exception:
             pass
+    if r.get("analysis"):
+        import analysis
+        res = analysis.run(r["analysis"])
+        rec["analysis_result"] = None if "error" in res else res
     return rec
 
 

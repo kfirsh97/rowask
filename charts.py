@@ -457,3 +457,26 @@ def stat_html(label, value, caption="") -> str:
     return (f'<div class="stat"><div class="stat-label">{escape(str(label))}</div>'
             f'<div class="stat-value">{escape(compact(value) if hasattr(value, "real") else str(value))}</div>'
             + (f'<div class="stat-caption">{escape(caption)}</div>' if caption else "") + "</div>")
+
+
+# ------------------------------------------------------------------ forecast (analysis.py)
+def forecast_chart(result: dict, height=300):
+    """History as a solid line, the forecast dashed, with its ~95% range as a band - one hue, so the eye reads it
+    as one series continuing into the future."""
+    hist = pd.DataFrame(result["history"])
+    fut = pd.DataFrame(result["forecast"])
+    y = result["y"]
+    # the forecast line starts at the last real point, so the two lines join
+    joint = pd.concat([hist.tail(1).rename(columns={"actual": "forecast"}).assign(low=None, high=None), fut])
+    fmt = _y_format(pd.concat([hist["actual"], fut["high"]]))
+    x = alt.X("period:O", title=None, axis=alt.Axis(labelAngle=0, labelOverlap="greedy"))
+    band = alt.Chart(fut).mark_area(color=CATEGORICAL[0], opacity=0.15).encode(
+        x=x, y=alt.Y("low:Q", title=y, axis=_axis(fmt)), y2="high:Q",
+        tooltip=[alt.Tooltip("period:O"), alt.Tooltip("low:Q", title="Low", format=",.2f"),
+                 alt.Tooltip("high:Q", title="High", format=",.2f")])
+    actual = alt.Chart(hist).mark_line(color=CATEGORICAL[0], strokeWidth=2).encode(
+        x=x, y="actual:Q", tooltip=[alt.Tooltip("period:O"), alt.Tooltip("actual:Q", title=y, format=",.2f")])
+    ahead = alt.Chart(joint).mark_line(color=CATEGORICAL[0], strokeWidth=2, strokeDash=[6, 4]).encode(
+        x=x, y="forecast:Q", tooltip=[alt.Tooltip("period:O"), alt.Tooltip("forecast:Q", title="Forecast", format=",.2f")])
+    points = alt.Chart(fut).mark_point(color=CATEGORICAL[0], filled=True, size=40).encode(x=x, y="forecast:Q")
+    return alt.layer(band, actual, ahead, points).properties(height=height)

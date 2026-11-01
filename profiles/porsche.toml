@@ -15,6 +15,7 @@ examples = [
     "מי שלושת המוכרים עם סך המכירות הגבוה ביותר?",
     "Which 5 car models sold for the highest average price?",
     "באיזו מדינה יש הכי הרבה לקוחות?",
+    "Forecast the monthly sales revenue for the next 3 months",
 ]
 
 # Business meaning of columns that the raw schema cannot tell the model.

@@ -18,6 +18,7 @@ an SQL course project, which is still its main benchmark (12/12 on questions wit
 - **Edit the SQL** behind any answer and rerun it; download the whole result as **Excel or CSV**
 - **Checks on every answer**: joins that repeat rows, empty values, incomplete periods; the agent's assumptions
   shown in one line
+- **Forecasts and statistical tests**: prepared analyses the agent picks from - it never runs its own code
 - **A metric dictionary**: one agreed definition per business number, used on every question
 - **Answer keys** that measure accuracy, including trap questions: 12/12 on Porsche, 16/16 on the first 16 Superstore questions
 
@@ -149,6 +150,24 @@ Without the dictionary the agent guessed "active" as the last 12 months (704 cus
 for the late shipment rate, rightly said the data doesn't define "late" and offered options. With it, both match the
 agreed definitions. (The third miss was Canada's sales picked from a table of every country; the prompt now asks for
 a final query that returns just the answer.)
+
+## Analyses: forecast, comparing groups, correlation, unusual values
+
+Some questions SQL can't answer honestly on its own: *what will sales be next quarter*, *is the East really more
+profitable or is it chance*, *does discount move with margin*, *which customers are unusual*. For those the agent
+calls `analyze` (`analysis.py`): it picks one analysis from a fixed list and names the columns of a query it wrote.
+
+- **Forecast** - Holt-Winters exponential smoothing (trend, plus 12-month seasonality with 2+ years of history), with
+  a ~95% range that widens the further ahead it goes; drawn as the history continuing in a dashed line and a band.
+- **Compare groups** - Welch's t-test and Mann-Whitney for two groups, Alexander-Govern and Kruskal-Wallis for more,
+  with the effect size; the verdict is "significant", "could be chance" or "mixed" when the two tests disagree.
+- **Correlation** - Pearson and Spearman, with "moving together is not causing" in the answer.
+- **Unusual values** - robust z-scores (median and MAD), so the outliers can't hide by inflating the average.
+
+The agent never writes or runs code for this: the query goes through the same read-only checks, the statistics are
+written and tested in advance (`tests/test_analysis.py` checks them on data with a known answer), and data that
+can't support an analysis - totals instead of observations, too little history - gets a clear refusal the agent can
+act on. On a public site that matters: an agent that ran its own Python could be talked into running anyone's.
 
 ## Checking every answer
 

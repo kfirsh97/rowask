@@ -50,6 +50,10 @@ How to work:
 - A run_query result can carry "warnings" from automatic checks: a join that repeats rows, empty values in a
   column you add up or group by, a last period that is not complete. Fix the query if the warning means the
   number is wrong (e.g. aggregate before joining); otherwise say it in the answer in one short sentence.
+- Forecasts, "is this difference real / significant", "do X and Y move together" and "what's unusual": call
+  analyze - never estimate a trend, a p-value or a correlation yourself. Report its summary in plain words (a
+  forecast with its range, a test with its verdict), mention its warnings, and say what kind of analysis it was.
+  For a forecast, check first whether the last period is complete and leave it out if not.
 - Only state numbers that came from a query result. Never invent data. Compute every number you state in SQL -
   a percentage change, a difference, a share, a ratio - and do no arithmetic yourself: your final query must
   return the number your answer gives (it may also return the numbers it was computed from).
@@ -123,6 +127,31 @@ TOOLS = types.Tool(function_declarations=[
             "required": ["sql"],
         },
     ),
+    types.FunctionDeclaration(
+        name="analyze",
+        description="Runs one prepared statistical analysis on the rows of a read-only SELECT you write - never "
+                    "estimate these by hand. kind=forecast: future values from history (sql returns one row per "
+                    "month 'YYYY-MM' or year, x = that column, y = the value; periods = how many ahead, default 3; "
+                    "leave out a last period that isn't complete). kind=compare_groups: is a difference between "
+                    "groups real or chance (sql returns ONE ROW PER OBSERVATION, e.g. per order, with group and "
+                    "value columns - not totals per group). kind=correlation: do two numbers move together (x, y, "
+                    "one row per observation). kind=outliers: unusual values (label and value columns). Returns a "
+                    "plain-language summary to report, the numbers, and warnings.",
+        parameters_json_schema={
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["forecast", "compare_groups", "correlation", "outliers"]},
+                "sql": {"type": "string", "description": "A single SELECT that returns the rows to analyse."},
+                "x": {"type": "string", "description": "forecast: the period column; correlation: first number."},
+                "y": {"type": "string", "description": "forecast: the value to forecast; correlation: second number."},
+                "group": {"type": "string", "description": "compare_groups: the column naming each row's group."},
+                "value": {"type": "string", "description": "compare_groups / outliers: the number to compare."},
+                "label": {"type": "string", "description": "outliers: what each row is (customer, product, month)."},
+                "periods": {"type": "integer", "description": "forecast: how many periods ahead (1-24)."},
+            },
+            "required": ["kind", "sql"],
+        },
+    ),
 ])
 
 
@@ -133,6 +162,9 @@ def call_tool(name: str, args: dict) -> dict:
         return {"schema": get_schema(tables if isinstance(tables, list) and tables else None)}
     if name == "run_query":
         return run_query(args.get("sql", ""))
+    if name == "analyze":
+        import analysis
+        return analysis.run(args)
     return {"error": f"Unknown tool: {name}"}
 
 
@@ -166,6 +198,8 @@ def _summary(result: dict) -> str:
         return f"ERROR: {result['error'][:120]}"
     if "schema" in result:
         return f"schema ({len(result['schema']):,} chars)"
+    if "kind" in result and "summary" in result:
+        return f"{result['kind'].replace('_', ' ')}: {result['summary'][:140]}"
     more = " (truncated)" if result.get("truncated") else ""
     return f"{result['row_count']} rows{more}"
 
@@ -251,7 +285,8 @@ def _run_gemini(question, client, verbose, on_step=None, history=None, should_st
             result = call_tool(call.name, args)
             if call.name == "run_query" and "error" not in result:
                 last_sql = args.get("sql")
-            steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result)})
+            steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result),
+                          "ok": "error" not in result})
             if on_step:
                 on_step(steps[-1])          # lets a UI show each step live
             if verbose:
@@ -307,7 +342,8 @@ def _run_claude(question, client, verbose, on_step=None, history=None, should_st
             result = call_tool(call.name, args)
             if call.name == "run_query" and "error" not in result:
                 last_sql = args.get("sql")
-            steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result)})
+            steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result),
+                          "ok": "error" not in result})
             if on_step:
                 on_step(steps[-1])          # lets a UI show each step live
             if verbose:
@@ -339,6 +375,10 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
     final_sql = None if stopped else (shown[-1].strip() if shown else last_sql)
     import charts
     chart, answer = charts.parse_spec(answer)        # the chart block is for the app, not for the reader
+    # The last analysis that ran is shown with the answer (a forecast chart, a test's numbers) - rerun by the app
+    # from these arguments, so the record stays small.
+    analysis = None if stopped else next((st["args"] for st in reversed(steps)
+                                          if st["tool"] == "analyze" and st.get("ok")), None)
 
     record = {
         "time": datetime.now().isoformat(timespec="seconds"),
@@ -348,6 +388,7 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
         "answer": answer,
         "final_sql": final_sql,
         "chart": chart,
+        "analysis": analysis,
         "steps": steps,
         "seconds": round(time.time() - started, 1),
         "stopped": stopped,

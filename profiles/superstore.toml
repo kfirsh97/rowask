@@ -14,6 +14,8 @@ examples = [
     "Which 5 sub-categories lose the most money?",
     "איך ההנחה משפיעה על הרווח?",
     "מי עשרת הלקוחות הכי רווחיים?",
+    "תחזה את המכירות החודשיות לשלושת החודשים הבאים",
+    "Is the difference in profit per order between the East and the Central region real, or chance?",
 ]
 
 notes = """
