@@ -60,3 +60,22 @@ def test_tricks_that_hide_a_second_statement_are_blocked(sql, dialect, monkeypat
 def test_names_and_strings_that_look_like_keywords_are_fine(monkeypatch):
     monkeypatch.setattr(tools.db, "dialect", lambda: "mssql")
     assert validate_query("SELECT [Delete Date], N'drop' FROM t -- update later") is None
+
+
+@pytest.mark.parametrize("sql, dialect", [
+    ("SELECT \"pg_read_file\"('/etc/passwd')", "postgresql"),       # a quoted function name is still that function
+    ("SELECT 1 /*M! INTO OUTFILE '/tmp/x' */", "mysql"),            # MariaDB runs /*M! ... */
+    ("SELECT 1 WAITFOR DELAY '00:00:29'", "mssql"),                 # T-SQL: a second statement needs no semicolon
+    ("SELECT 1 KILL 55", "mssql"),
+    ("SELECT 1 DBCC FREEPROCCACHE", "mssql"),
+    ("SELECT 1 BEGIN TRAN SELECT * FROM t WITH (TABLOCKX, HOLDLOCK)", "mssql"),
+    ("SELECT 1", "no-such-database"),                               # unknown dialect: refuse, don't guess
+])
+def test_second_review_bypasses_are_blocked(sql, dialect, monkeypatch):
+    monkeypatch.setattr(tools.db, "dialect", lambda: dialect)
+    assert validate_query(sql) is not None
+
+
+def test_quoted_names_that_are_not_called_stay_fine(monkeypatch):
+    monkeypatch.setattr(tools.db, "dialect", lambda: "postgresql")
+    assert validate_query('SELECT "Delete Date", "pg_read_file" FROM t') is None

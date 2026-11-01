@@ -36,36 +36,44 @@ _schema_cache = {}
 
 # ---------------------------------------------------------------- safety
 
+# SQL Server runs a whole batch: a second statement needs no semicolon ("SELECT 1 WAITFOR DELAY ..."), so the words
+# that start one are refused too, as are lock hints that could hold a table.
+TSQL_FORBIDDEN = ["waitfor", "kill", "dbcc", "begin", "commit", "rollback", "save", "declare", "set", "use", "print",
+                  "raiserror", "throw", "checkpoint", "reconfigure", "bulk", "readtext", "writetext", "updatetext",
+                  "open", "close", "fetch", "deallocate", "goto", "return", "while",
+                  "tablockx", "tablock", "xlock", "updlock", "holdlock", "paglock"]
+
+
 def _sql_dialect():
-    """The sqlglot dialect of the connected database, for reading a query exactly as the server will."""
+    """The sqlglot dialect of the connected database, for reading a query exactly as the server will - or None when it
+    can't be told, and then validate_query refuses (a generic reader would not see what this server sees)."""
     try:
         from drill import DIALECTS
-        return DIALECTS.get(db.dialect(), None)
+        return DIALECTS.get(db.dialect())
     except Exception:
         return None
-
-
-def _tokens(sql: str):
-    """The query as the server reads it, in one left-to-right pass: strings, quoted names and comments are each
-    recognised once, by the dialect's own rules (a '--' inside a string is text; in MySQL '\\'' is an escaped quote)."""
-    from sqlglot.dialects.dialect import Dialect
-    return Dialect.get_or_raise(_sql_dialect()).tokenize(sql)
 
 
 def validate_query(sql: str):
     """Return None if the query is allowed, otherwise a short reason why not."""
     if not sql or not sql.strip():
         return "Empty query."
-    try:
-        tokens = _tokens(sql)
-    except Exception:
-        return "Could not read the query."
-    if "\\" in sql and _sql_dialect() in ("postgres", "mysql"):
+    dialect = _sql_dialect()
+    if dialect is None:
+        return "Could not tell which kind of database this is, so the query was not run."
+    if "\\" in sql and dialect in ("postgres", "mysql"):
         # Backslashes are read differently by server versions and settings (MySQL's escapes, PostgreSQL's E'' strings,
         # and before version 15 even 1e'\\'' became one): refused rather than guessed at. A SELECT rarely needs one.
         return "Backslashes are not allowed in queries on this database."
-    if any(c.lstrip().startswith(("!", "+")) for t in tokens for c in t.comments):
-        return "Executable comments are not allowed."          # MySQL runs /*! ... */; optimizer hints /*+ ... */
+    try:
+        from sqlglot.dialects.dialect import Dialect
+        # One left-to-right pass, by this database's own rules: strings, quoted names and comments are each recognised
+        # once (a '--' inside a string is text; MySQL's '\\'' is an escaped quote; nested /* */ in PostgreSQL).
+        tokens = Dialect.get_or_raise(dialect).tokenize(sql)
+    except Exception:
+        return "Could not read the query."
+    if any(c.lstrip().upper().startswith(("!", "+", "M!")) for t in tokens for c in t.comments):
+        return "Executable comments are not allowed."          # MySQL /*! */, MariaDB /*M! */, optimizer hints /*+ */
     while tokens and tokens[-1].token_type.name == "SEMICOLON":
         tokens = tokens[:-1]
     if not tokens:
@@ -74,13 +82,21 @@ def validate_query(sql: str):
         return "Only one statement is allowed."
     if tokens[0].text.lower() not in ("select", "with"):
         return "Only SELECT queries are allowed."
-    # Keywords only count outside strings and quoted names: a customer named 'Drop' or a column "Delete Date" is fine.
-    words = " ".join("''" if t.token_type.name.endswith("STRING") else
-                     '"x"' if t.token_type.name == "IDENTIFIER" else t.text for t in tokens).lower()
-    for word in FORBIDDEN:
-        pattern = rf"\b{re.escape(word)}" if word.endswith("_") else rf"\b{re.escape(word)}\b"
+    # Keywords count outside strings and quoted names (a customer named 'Drop', a column "Delete Date" are fine) -
+    # except a quoted name used as a function: PostgreSQL runs "pg_read_file"(...) like pg_read_file(...).
+    def word(i, t):
+        kind = t.token_type.name
+        if kind.endswith("STRING"):
+            return "''"
+        if kind == "IDENTIFIER":
+            called = i + 1 < len(tokens) and tokens[i + 1].token_type.name == "L_PAREN"
+            return t.text if called else '"x"'
+        return t.text
+    words = " ".join(word(i, t) for i, t in enumerate(tokens)).lower()
+    for w in FORBIDDEN + (TSQL_FORBIDDEN if dialect == "tsql" else []):
+        pattern = rf"\b{re.escape(w)}" if w.endswith("_") else rf"\b{re.escape(w)}\b"
         if re.search(pattern, words):
-            return f"Forbidden keyword: {word.upper()}"
+            return f"Forbidden keyword: {w.upper()}"
     return None
 
 
