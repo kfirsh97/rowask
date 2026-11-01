@@ -37,6 +37,20 @@ DEMO = os.environ.get("DEMO", "").lower() in ("1", "true", "yes")
 UPLOAD_TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "xls", "sql", "sqlite", "sqlite3", "db"]
 
 
+@st.cache_resource(ttl=3600)
+def sweep_old_uploads(hours=6):
+    """Uploads of sessions that ended without removing their files: delete them after a few hours (once an hour)."""
+    import shutil
+    cutoff = time.time() - hours * 3600
+    for d in Path(tempfile.gettempdir()).glob("sql-agent-upload-*"):
+        try:
+            if d.stat().st_mtime < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+    return True
+
+
 def sync_upload():
     """Build a database from the files in the sidebar uploader whenever they change, and drop it when they are
     removed. Runs at the top of every page run, so the title, the agent and the schema all follow the upload."""
@@ -61,6 +75,7 @@ def sync_upload():
 
 
 if not DEMO:
+    sweep_old_uploads()
     sync_upload()
 UPLOAD = st.session_state.get("upload")
 # Sample databases a visitor can open from the home page (SQLite files in data/, read-only).
@@ -213,7 +228,8 @@ result, charts it, and shows the query behind every answer - so every number can
         st.error(st.session_state.upload_error)
     st.caption("CSV and Excel files are cleaned on the way in (column names, dates, numbers, codes); SQL scripts from "
                "SQL Server, MySQL, PostgreSQL or SQLite are translated and loaded. Your files stay in this browser "
-               "session and are gone when you leave.")
+               "session and are deleted afterwards. The AI model sees column names and query results, so don't "
+               "upload personal or confidential data to this public demo. Up to 25 MB per file.")
     st.markdown("#### Or try a sample database")
     cards = list(SAMPLES.items())
     if CONFIGURED:
@@ -345,10 +361,14 @@ def is_hebrew(text):
     return False
 
 
+HTML_TAG = re.compile(r"</?[A-Za-z][^>]*>")
+
+
 def md(text):
     """Markdown that flips to right-to-left (bullets included) when the text is Hebrew."""
     if is_hebrew(text):
-        st.markdown(f'<div class="rtl">\n\n{text}\n\n</div>', unsafe_allow_html=True)
+        # The wrapper div needs HTML on; the text itself must not carry any (it can come from uploaded data)
+        st.markdown(f'<div class="rtl">\n\n{HTML_TAG.sub("", text)}\n\n</div>', unsafe_allow_html=True)
     else:
         st.markdown(text)
 

@@ -8,6 +8,7 @@ font = "sans serif"
 
 [server]
 headless = true
+maxUploadSize = 25        # MB per file: enough for real spreadsheets, not enough to tie up a free server
 
 [browser]
 gatherUsageStats = false

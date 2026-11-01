@@ -13,6 +13,7 @@ The script runs in a fresh database file with a guard (an SQLite authorizer) tha
 reach outside that file: ATTACH, DETACH, PRAGMA, VACUUM INTO, loading extensions.
 """
 import re
+import time
 import sqlite3
 from collections import Counter
 
@@ -148,11 +149,16 @@ def _bare(name: str) -> str:
     return name.split(".")[-1].strip('"`[]')
 
 
+IMPORT_TIMEOUT_S = 120
+
+
 def run_script(con: sqlite3.Connection, text: str) -> dict:
     """Run a SQL script into con. Returns a summary: dialect, counts, skipped kinds, errors, foreign keys added."""
     dialect = guess_dialect(text)
     con.isolation_level = None                     # we manage transactions ourselves (BEGIN / SAVEPOINT / COMMIT)
     con.set_authorizer(_guard)
+    deadline = time.monotonic() + IMPORT_TIMEOUT_S  # a script that runs forever (e.g. an endless recursive CTE) stops
+    con.set_progress_handler(lambda: int(time.monotonic() > deadline), 100_000)
     done, skipped, errors, fks, identities = 0, Counter(), [], [], {}
     con.execute("BEGIN")
     for stmt in split(text):
@@ -190,6 +196,13 @@ def run_script(con: sqlite3.Connection, text: str) -> dict:
                 done += 1
                 break
             except sqlite3.Error as e:
+                if time.monotonic() > deadline:              # interrupted: stop the whole import, cleanly
+                    con.set_progress_handler(None, 0)
+                    if con.in_transaction:                   # an interrupt may already have rolled it back
+                        con.execute("ROLLBACK")
+                    con.set_authorizer(None)
+                    raise ValueError(f"The SQL script took longer than {IMPORT_TIMEOUT_S} seconds to load and was "
+                                     "stopped.") from None
                 con.execute("ROLLBACK TO s")
                 con.execute("RELEASE s")
                 last_error = e
@@ -200,6 +213,7 @@ def run_script(con: sqlite3.Connection, text: str) -> dict:
             con.execute(f'UPDATE "{table}" SET "{col}" = {seed} + ("{col}" - 1) * {step}')
         except sqlite3.Error:
             pass
+    con.set_progress_handler(None, 0)
     con.execute("COMMIT")
     added = _add_foreign_keys(con, fks, dialect)
     con.set_authorizer(None)

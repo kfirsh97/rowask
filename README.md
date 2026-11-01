@@ -58,6 +58,11 @@ Chinook music-store database on SQLite and PostgreSQL. See [SETUP.md → Your ow
 | `validate_query()` before the database | Anything that is not a single SELECT: `DELETE`, `DROP`, `SELECT INTO`, `EXEC`, stacked statements, keywords hidden in comments — while allowing those words inside strings |
 | Limits | 30 s per query, 50 rows to the model, 8 steps per question, 90 s per model call |
 
+**On the public demo** (every visitor is a stranger): questions are capped per visit and per day; uploads are limited
+to 25 MB, kept per browser session and swept after 6 hours; an uploaded SQL script is stopped after 120 s, and runs
+with ATTACH, PRAGMA and extensions denied; HTML in answers is never rendered; the API key lives in the host's secrets,
+never in the code. The hard ceiling on cost is the monthly spend limit set on the key itself.
+
 ## Reliability
 
 The free Gemini tier is often overloaded. The agent retries with growing waits, and if the main model stays busy,

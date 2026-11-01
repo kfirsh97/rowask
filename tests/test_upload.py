@@ -149,3 +149,13 @@ def test_sql_script_cannot_reach_outside_its_database(tmp_path):
     up = upload.build([("evil.sql", script)], tmp_path / "up")
     assert not outside.exists() and not (tmp_path / "copy.db").exists()
     assert list(up.tables) == ["t"]
+
+
+def test_a_script_that_never_ends_is_stopped(tmp_path, monkeypatch):
+    """A public demo runs uploaded SQL: an endless recursive CTE must not tie up the server."""
+    import sqlimport
+    monkeypatch.setattr(sqlimport, "IMPORT_TIMEOUT_S", 1)
+    script = ("CREATE TABLE t (x INTEGER);\n"
+              "INSERT INTO t WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT x FROM c;\n")
+    with pytest.raises(ValueError, match="took longer than 1 seconds"):
+        upload.build([("loop.sql", script.encode())], tmp_path / "up")
