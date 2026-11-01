@@ -79,3 +79,25 @@ def test_second_review_bypasses_are_blocked(sql, dialect, monkeypatch):
 def test_quoted_names_that_are_not_called_stay_fine(monkeypatch):
     monkeypatch.setattr(tools.db, "dialect", lambda: "postgresql")
     assert validate_query('SELECT "Delete Date", "pg_read_file" FROM t') is None
+
+
+@pytest.mark.parametrize("sql, dialect", [
+    ("SELECT U&\"!0070g_read_file\"('/etc/passwd') UESCAPE '!'", "postgresql"),   # unicode-escaped function name
+    ("SELECT 1 SELECT 2", "mssql"),                                                # a second SELECT in the batch
+    ("SELECT (1) SELECT 2", "mssql"),
+    ("SELECT * FROM OPENQUERY(srv, 'SELECT 1')", "mssql"),                         # linked servers
+])
+def test_third_review_bypasses_are_blocked(sql, dialect, monkeypatch):
+    monkeypatch.setattr(tools.db, "dialect", lambda: dialect)
+    assert validate_query(sql) is not None
+
+
+@pytest.mark.parametrize("sql, dialect", [
+    ("SELECT [Open], [Close], save, Return FROM prices", "mssql"),                 # column names, not statements
+    ("WITH \"Sales Update\"(x) AS (SELECT 1) SELECT x FROM \"Sales Update\"", "postgresql"),
+    ("SELECT 1 UNION ALL SELECT 2", "mssql"),
+    ("WITH c AS (SELECT 1 AS a) SELECT a FROM c", "mssql"),
+])
+def test_ordinary_queries_are_not_refused(sql, dialect, monkeypatch):
+    monkeypatch.setattr(tools.db, "dialect", lambda: dialect)
+    assert validate_query(sql) is None

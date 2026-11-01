@@ -31,15 +31,28 @@ from dbprofile import load_profile
 HERE = Path(__file__).parent
 
 
+def plain(text):
+    """Text from uploaded data or from the model, made safe for any Streamlit Markdown - labels included, where
+    Streamlit draws images too: no image syntax at all (any '!' before '[' goes, so '!![x](u)' can't rebuild one)."""
+    return re.sub(r"!+(?=\[)", "", str(text))
+
+
 def esc(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 DEMO = os.environ.get("DEMO", "").lower() in ("1", "true", "yes")
 # A public demo (question limits set): nothing a visitor does is written to the shared server, e.g. dashboards.
 def _limit(name):
-    try:
-        return max(int(os.environ.get(name, "0") or 0), 0)
-    except ValueError:
+    """A question limit from the env. Set but unreadable ("ten", "1O") means a limit was wanted: use a safe one
+    rather than none at all, and say so in the server log."""
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
         return 0
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        safe = {"QUESTION_LIMIT": 10, "DAILY_LIMIT": 200}[name]
+        print(f"{name}={raw!r} is not a whole number - using {safe}.")
+        return safe
 
 
 PUBLIC = bool(_limit("QUESTION_LIMIT") or _limit("DAILY_LIMIT"))
@@ -113,7 +126,7 @@ try:
     PROFILE_ERROR = None
 except Exception as e:                                        # bad DB_PROFILE: still show the page, with the reason
     PROFILE, PROFILE_ERROR = load_profile("generic"), str(e)
-EXAMPLES = PROFILE["examples"]
+EXAMPLES = [plain(x) for x in PROFILE["examples"]]       # an upload's examples are built from its column names
 
 BRAND = "RowAsk"
 st.set_page_config(page_title=BRAND if HOME else f"{BRAND} · {PROFILE['title']}", page_icon="🏁", layout="centered")
@@ -236,7 +249,7 @@ result, charts it, and shows the query behind every answer - so every number can
     st.markdown("#### Upload your data")
     uploader()
     if st.session_state.get("upload_error"):
-        st.error(st.session_state.upload_error)
+        st.error(plain(st.session_state.upload_error))
     st.caption("CSV and Excel files are cleaned on the way in (column names, dates, numbers, codes); SQL scripts from "
                "SQL Server, MySQL, PostgreSQL or SQLite are translated and loaded. Your files stay in this browser "
                "session and are deleted afterwards. The AI model sees column names and query results, so don't "
@@ -282,9 +295,9 @@ if PROFILE_ERROR:
     st.error(PROFILE_ERROR)
 if UPLOAD:
     tables = ", ".join(f"{t} ({n:,} rows)" for t, n in UPLOAD.tables.items())
-    with st.expander(f"Loaded {len(UPLOAD.tables)} table{'s' if len(UPLOAD.tables) != 1 else ''}: {tables}",
+    with st.expander(plain(f"Loaded {len(UPLOAD.tables)} table{'s' if len(UPLOAD.tables) != 1 else ''}: {tables}"),
                      expanded=not st.session_state.get("history"), icon=":material/cleaning_services:"):
-        st.markdown("**What was cleaned**\n\n" + "\n".join(f"- {esc(r)}" for r in UPLOAD.report))
+        st.markdown("**What was cleaned**\n\n" + "\n".join(f"- {plain(esc(r))}" for r in UPLOAD.report))
         st.caption("The agent also gets a description of every column - its values, ranges and dates - "
                    "so it can write correct SQL for data it has never seen.")
 
@@ -312,7 +325,7 @@ with st.sidebar:
     st.markdown("#### Your data")
     uploader()
     if st.session_state.get("upload_error"):
-        st.error(st.session_state.upload_error)
+        st.error(plain(st.session_state.upload_error))
     if not DEMO:
         st.button("Choose other data", icon=":material/home:", on_click=go_home, key="go-home")
     st.markdown("#### Database")
@@ -372,14 +385,11 @@ def is_hebrew(text):
     return False
 
 
-IMAGE = re.compile(r"!(\[[^\]]*\])")
-
-
 def md(text):
     """Model text as Markdown - right-to-left when it is Hebrew - with nothing in it that loads by itself."""
     # No HTML is rendered, and no images: ![](https://x/?d=...) would make the browser fetch that address on its own,
     # carrying whatever an uploaded file got the model to put in it. Shown as a plain link instead (needs a click).
-    text = IMAGE.sub(r"\1", text or "")
+    text = plain(text or "")
     if is_hebrew(text):
         # Right-to-left by a CSS rule on a keyed container. The key follows the order of the texts on the page, so it
         # stays the same from one run to the next and nothing is redrawn needlessly.
@@ -472,7 +482,7 @@ def chart_view(key, spec, columns, rows, sql, height=300, tabs=True, on_type=Non
         crumbs[0].button(names[0], key=f"crumb{key}-0", icon=":material/arrow_upward:",
                          on_click=drill_back, args=(key, 0))
         for i, step in enumerate(path, 1):
-            crumbs[i].button(str(step["value"]), key=f"crumb{key}-{i}", disabled=i == len(path),
+            crumbs[i].button(plain(step["value"]), key=f"crumb{key}-{i}", disabled=i == len(path),
                              on_click=drill_back, args=(key, i))
     level = drill.next_level(sql, spec["x"]) if spec.get("type") in DRILLABLE and sql else None
 
@@ -494,7 +504,7 @@ def chart_view(key, spec, columns, rows, sql, height=300, tabs=True, on_type=Non
             what = {"pie": "a slice", "map": "a place", "stacked_100": "a bar"}.get(spec["type"], "a bar")
             notes.append(f"Click {what} to see its {level[2].replace('_', ' ')}.")
         if notes:
-            st.caption(" ".join(notes))
+            st.caption(plain(" ".join(notes)))
         if level:                                              # a click on a drillable chart: zoom in
             picked = (event.selection or {}).get(charts.DRILL)
             if picked:

@@ -29,6 +29,7 @@ FORBIDDEN = [
     "copy", "call", "dblink", "lo_import", "lo_export",                  # PostgreSQL
     "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_sleep",
     "load_file",                                                         # MySQL
+    "openquery", "openxml",                                              # SQL Server: linked servers, XML docs
 ]
 
 _schema_cache = {}
@@ -54,6 +55,34 @@ def _sql_dialect():
         return None
 
 
+def _tsql_batch(sql: str, words: str, tokens):
+    """SQL Server runs a whole batch, and a second statement needs no semicolon ("SELECT 1 WAITFOR DELAY ...").
+    A query sqlglot reads as exactly one SELECT is fine - so a column named Open, Save or Return is not refused. One it
+    can't read is checked for the words that start another statement, and for table lock hints."""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        parsed = [x for x in sqlglot.parse(sql, read="tsql") if x is not None]
+    except Exception:
+        parsed = None
+    if parsed is not None:
+        if len(parsed) == 1 and isinstance(parsed[0], exp.Query):
+            return None
+        return "Only one statement is allowed."
+    for w in TSQL_FORBIDDEN:
+        if re.search(rf"\b{w}\b", words):
+            return f"Forbidden keyword: {w.upper()}"
+    depth, starts = 0, 0                      # "SELECT 1 SELECT 2": a SELECT at the top level that no UNION joins
+    for i, t in enumerate(tokens):
+        kind = t.token_type.name
+        depth += kind == "L_PAREN"
+        depth -= kind == "R_PAREN"
+        if depth == 0 and kind == "SELECT" and (i == 0 or tokens[i - 1].token_type.name not in
+                                                 ("UNION", "ALL", "INTERSECT", "EXCEPT", "DISTINCT")):
+            starts += 1
+    return "Only one statement is allowed." if starts > 1 else None
+
+
 def validate_query(sql: str):
     """Return None if the query is allowed, otherwise a short reason why not."""
     if not sql or not sql.strip():
@@ -61,6 +90,8 @@ def validate_query(sql: str):
     dialect = _sql_dialect()
     if dialect is None:
         return "Could not tell which kind of database this is, so the query was not run."
+    if dialect == "postgres" and re.search(r"\bU&[\"']|\bUESCAPE\b", sql, re.I):
+        return "Unicode-escaped names and strings are not allowed."   # U&"!0070g_read_file" UESCAPE '!'
     if "\\" in sql and dialect in ("postgres", "mysql"):
         # Backslashes are read differently by server versions and settings (MySQL's escapes, PostgreSQL's E'' strings,
         # and before version 15 even 1e'\\'' became one): refused rather than guessed at. A SELECT rarely needs one.
@@ -83,20 +114,20 @@ def validate_query(sql: str):
     if tokens[0].text.lower() not in ("select", "with"):
         return "Only SELECT queries are allowed."
     # Keywords count outside strings and quoted names (a customer named 'Drop', a column "Delete Date" are fine) -
-    # except a quoted name used as a function: PostgreSQL runs "pg_read_file"(...) like pg_read_file(...).
-    def word(i, t):
-        kind = t.token_type.name
-        if kind.endswith("STRING"):
-            return "''"
-        if kind == "IDENTIFIER":
-            called = i + 1 < len(tokens) and tokens[i + 1].token_type.name == "L_PAREN"
-            return t.text if called else '"x"'
-        return t.text
-    words = " ".join(word(i, t) for i, t in enumerate(tokens)).lower()
-    for w in FORBIDDEN + (TSQL_FORBIDDEN if dialect == "tsql" else []):
+    # but a quoted name used as a function is that function: PostgreSQL runs "pg_read_file"(...) like pg_read_file().
+    called = {t.text.lower() for i, t in enumerate(tokens[:-1])
+              if t.token_type.name == "IDENTIFIER" and tokens[i + 1].token_type.name == "L_PAREN"}
+    for name in called:
+        if name in FORBIDDEN or name.startswith(("xp_", "sp_")):
+            return f"Forbidden function: {name}"
+    words = " ".join("''" if t.token_type.name.endswith("STRING") else
+                     '"x"' if t.token_type.name == "IDENTIFIER" else t.text for t in tokens).lower()
+    for w in FORBIDDEN:
         pattern = rf"\b{re.escape(w)}" if w.endswith("_") else rf"\b{re.escape(w)}\b"
         if re.search(pattern, words):
             return f"Forbidden keyword: {w.upper()}"
+    if dialect == "tsql":
+        return _tsql_batch(sql, words, tokens)
     return None
 
 
