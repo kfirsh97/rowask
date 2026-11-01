@@ -195,6 +195,7 @@ st.html("""
 .home-about { color: var(--steel); font-size: .9rem; line-height: 1.45; margin: .4rem 0 .2rem; min-height: 4.2rem; }
 .home-steps { color: var(--slate); padding-left: 1.2rem; line-height: 1.55; }
 .home-steps li { margin-bottom: .35rem; }
+.ai-note { color: var(--steel); font-size: .78rem; text-align: center; margin: .6rem 0 -.4rem; }
 .demo-note { border-left: 3px solid var(--signal); padding: .4rem .7rem; background: var(--paper); color: var(--slate); font-size: .9rem; margin-bottom: 1rem; }
 
 .score { display: flex; align-items: baseline; gap: .5rem; }
@@ -913,6 +914,8 @@ left = [q for q in EXAMPLES if q not in asked]
 if left and not blocked:
     picked = st.pills("More questions to try" if st.session_state.history else "Try a question", left,
                       key=f"pick{st.session_state.get('chat_id', 0)}-{len(st.session_state.history)}")
+st.html('<div class="ai-note">RowAsk is AI and can make mistakes. Check the SQL behind an answer before you rely on '
+        'its numbers.</div>')
 typed = st.chat_input("Ask a follow-up, or a new question" if st.session_state.history
                       else "Ask a question about the data, in Hebrew or English", disabled=bool(blocked))
 question = None if blocked else (typed or picked)
