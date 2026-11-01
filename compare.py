@@ -32,8 +32,10 @@ def _decimals(x: float) -> int:
     return len(text.split(".")[1]) if "." in text and "e" not in text else 0
 
 
-def _same(a, b):
+def _same(a, b, decimals=None):
     a, b = _norm(a), _norm(b)
+    if isinstance(a, float) and isinstance(b, float) and decimals is not None:   # the question set the precision
+        return abs(a - b) <= 10 ** -decimals + 1e-9
     if isinstance(a, float) and isinstance(b, float):
         if a.is_integer() and b.is_integer():
             return a == b
@@ -49,7 +51,7 @@ def _key(row):
     return tuple(int(v) if isinstance(v, float) and v.is_integer() else v for v in map(_norm, row))
 
 
-def _rows_match(expected, got):
+def _rows_match(expected, got, decimals=None):
     """Same set of rows, with fuzzy number comparison.
     Exact matches are removed with a hash lookup first (fast even for thousands of rows);
     only the few leftovers get the slower fuzzy comparison."""
@@ -61,7 +63,7 @@ def _rows_match(expected, got):
     exp, remaining = list(exp - common), list(remaining - common)
     for row in exp:
         for i, cand in enumerate(remaining):
-            if all(_same(x, y) for x, y in zip(row, cand)):
+            if all(_same(x, y, decimals) for x, y in zip(row, cand)):
                 remaining.pop(i)
                 break
         else:
@@ -69,8 +71,9 @@ def _rows_match(expected, got):
     return True
 
 
-def results_match(expected_rows, got_rows):
-    """True if got_rows contains the expected answer (see rules above)."""
+def results_match(expected_rows, got_rows, decimals=None):
+    """True if got_rows contains the expected answer (see rules above). decimals: compare numbers to that precision
+    instead (a question that asks for two decimals)."""
     if not expected_rows:
         return not got_rows
     if not got_rows:
@@ -81,6 +84,6 @@ def results_match(expected_rows, got_rows):
     # Try every way of picking n_exp of the agent's columns, in order, and see if one lines up.
     for cols in permutations(range(n_got), n_exp):
         projected = [tuple(r[c] for c in cols) for r in got_rows]
-        if _rows_match(expected_rows, projected):
+        if _rows_match(expected_rows, projected, decimals):
             return True
     return False

@@ -59,7 +59,7 @@ aliases = ["number of sales", "sales count", "מספר מכירות", "כמה מ
 [[metrics]]
 name = "Average sale price"
 definition = "Revenue divided by cars sold."
-sql = "AVG(Sold_Price)"
+sql = "AVG(CAST(Sold_Price AS FLOAT))"     # SQL Server would truncate AVG of whole numbers
 table = "Sales"
 date = "Sold_Date"
 unit = "USD"

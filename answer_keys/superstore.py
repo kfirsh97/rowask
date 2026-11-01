@@ -8,7 +8,9 @@ plausible number, and is wrong:
   - "at least one" questions that need DISTINCT orders, not lines
   - the US only, when the table also holds Canada
 
-Each question says what to return, so there is one right answer. Months and years are numbers.
+Each question says what to return, so there is one right answer. Months and years are numbers. A question with
+"decimals" is graded to that precision (a rate counted over rows, 40.00%, must not pass for one counted over
+orders, 39.78%).
 
 Questions 17-19 ask for business metrics by name. Their answers follow the metric dictionary in
 profiles/superstore.toml (an "active customer" ordered in the last 90 days of the data; a shipment is late after
@@ -84,8 +86,8 @@ QUESTIONS = [
      "question": "How many active customers do we have?",
      "expected_sql": """SELECT COUNT(DISTINCT Customer_ID) FROM superstore
                         WHERE Order_Date > date((SELECT MAX(Order_Date) FROM superstore), '-90 days')"""},
-    {"id": 18, "metric": "Late shipment rate",
-     "question": "מה שיעור המשלוחים המאוחרים?",
+    {"id": 18, "metric": "Late shipment rate", "decimals": 2,
+     "question": "מה שיעור המשלוחים המאוחרים? החזר אחוז עם שתי ספרות אחרי הנקודה.",
      "expected_sql": """SELECT 100.0 * COUNT(DISTINCT CASE WHEN julianday(Ship_Date) - julianday(Order_Date) > 4
                         THEN Order_ID END) / COUNT(DISTINCT Order_ID) FROM superstore"""},
     {"id": 19, "metric": "Average order value", "trap": "average of orders, not of lines",

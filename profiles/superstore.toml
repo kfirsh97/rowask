@@ -70,7 +70,7 @@ aliases = ["AOV", "ערך הזמנה ממוצע", "ממוצע להזמנה"]
 
 [[metrics]]
 name = "Active customers"
-definition = "Customers (by Customer_ID) with at least one order in the last 90 days of the data - counted back from the latest order date in the table, not from today."
+definition = "Customers (by Customer_ID) with an order dated after the day 90 days before the latest order date in the table (counted back from the data, not from today; the day exactly 90 days before is not included)."
 sql = "COUNT(DISTINCT Customer_ID)"
 table = "superstore"
 filter = "Order_Date > date((SELECT MAX(Order_Date) FROM superstore), '-90 days')"

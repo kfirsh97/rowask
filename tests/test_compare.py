@@ -69,3 +69,11 @@ def test_fraction_is_not_a_percentage():
 def test_numbers_written_as_text():
     assert results_match([(12,)], [("12",)])
     assert results_match([(2025, 613933.58)], [("2025", 613933.58)])
+
+
+def test_a_question_can_set_the_precision():
+    """'Late shipment rate, two decimals': 39.78 is right, 40.00 (counted over rows instead of orders) is not -
+    though the default whole-vs-decimal tolerance would let a rounded 40 through."""
+    assert results_match([(39.77695167286245,)], [(39.78,)], decimals=2)
+    assert not results_match([(39.77695167286245,)], [(40.0,)], decimals=2)
+    assert not results_match([(39.77695167286245,)], [(40.00392387679027,)], decimals=2)

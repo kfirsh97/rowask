@@ -113,7 +113,7 @@ def main():
         else:
             try:
                 _, got = run_query_all(r["final_sql"])
-                ok, note = results_match(expected, got), ""
+                ok, note = results_match(expected, got, q.get("decimals")), ""
                 if not ok and top_row_answers(expected, got, r["final_sql"]):
                     ok, note = True, f"answer in the first row of an ordered list of {len(got)}"
                 rec.update(correct=ok, note=note, reason="" if ok else

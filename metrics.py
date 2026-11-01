@@ -17,10 +17,9 @@ A profile defines metrics in TOML:
     filter = ""                        # optional: a WHERE condition that is always part of the metric
     aliases = ["sales", "הכנסות"]      # optional: other words people use for it
 
-Every metric is checked against the database when it is first shown (it must run as a read-only SELECT); one that
-doesn't is left out and reported, so a typo in a profile can't send the agent a broken definition.
+Every metric is checked against the database when it is first shown - its expression, filter and date column must
+all resolve, as a read-only SELECT; one that doesn't is left out and reported, so a typo in a profile can't send the agent a broken definition.
 """
-from functools import lru_cache
 
 FIELDS = {"name", "definition", "sql", "table", "date", "filter", "aliases", "unit"}
 REQUIRED = ("name", "definition", "sql", "table")
@@ -39,9 +38,14 @@ def parse(raw) -> list:
             raise ValueError(f"metric {label}: unknown setting(s) {', '.join(sorted(unknown))}")
         if missing:
             raise ValueError(f"metric {label}: missing {', '.join(missing)}")
+        for f in ("name", "definition", "sql", "table", "date", "filter", "unit"):
+            if f in m and not isinstance(m[f], str):
+                raise ValueError(f"metric {label}: {f} must be text")
         aliases = m.get("aliases") or []
         if isinstance(aliases, str):
             aliases = [aliases]
+        if not isinstance(aliases, list) or not all(isinstance(a, str) for a in aliases):
+            raise ValueError(f"metric {label}: aliases must be a list of words")
         out.append({"name": m["name"].strip(), "definition": m["definition"].strip(), "sql": m["sql"].strip(),
                     "table": m["table"].strip(), "date": (m.get("date") or "").strip(),
                     "filter": (m.get("filter") or "").strip(), "unit": (m.get("unit") or "").strip(),
@@ -54,34 +58,44 @@ def parse(raw) -> list:
 
 
 def probe_sql(m: dict) -> str:
-    """The query that proves a metric runs: its aggregate over its table, with its filter."""
+    """The metric as a query: its aggregate over its table, with its filter."""
     where = f" WHERE {m['filter']}" if m["filter"] else ""
     return f"SELECT {m['sql']} AS value FROM {m['table']}{where}"
 
 
-@lru_cache(maxsize=64)
-def _checked(url: str, profile: str, frozen: tuple) -> tuple:
-    import tools
-    ok, bad = [], []
-    for m in (dict(x) for x in frozen):
-        m["aliases"] = list(m["aliases"])
-        try:
-            tools.run_query_all(probe_sql(m), max_rows=1)
-            ok.append(m)
-        except Exception as e:
-            bad.append((m["name"], str(getattr(e, "orig", None) or e)[:160]))
-    return tuple(ok), tuple(bad)
+def _check_sql(m: dict) -> str:
+    """What proves a definition is sound without reading the table: every name in it - the expression, the filter
+    and the date column - must resolve, which the database checks before running anything (WHERE 1 = 0 returns no
+    rows, so even a large table is not scanned)."""
+    cond = f"({m['filter']}) AND 1 = 0" if m["filter"] else "1 = 0"
+    date = f", MAX({m['date']}) AS last_date" if m["date"] else ""
+    return f"SELECT {m['sql']} AS value{date} FROM {m['table']} WHERE {cond}"
+
+
+_ok_cache = {}                 # (database, definitions) -> metrics that passed. Failures are never cached:
+                               # a dropped connection must not leave the agent without its dictionary until a restart
 
 
 def checked(profile: dict) -> tuple:
-    """(metrics that run on this database, [(name, error)] for the ones that don't). Cached per database."""
+    """(metrics that run on this database, [(name, error)] for the ones that don't)."""
     import db
+    import tools
     ms = parse(profile.get("metrics"))
     if not ms:
         return [], []
-    frozen = tuple(tuple(sorted({**m, "aliases": tuple(m["aliases"])}.items())) for m in ms)
-    ok, bad = _checked(db.database_url(), profile.get("name", ""), frozen)
-    return list(ok), list(bad)
+    key = (db.database_url(), repr(ms))
+    if key in _ok_cache:
+        return list(_ok_cache[key]), []
+    ok, bad = [], []
+    for m in ms:
+        try:
+            tools.run_query_all(_check_sql(m), max_rows=1)
+            ok.append(m)
+        except Exception as e:
+            bad.append((m["name"], str(getattr(e, "orig", None) or e)[:160]))
+    if not bad:
+        _ok_cache[key] = ok
+    return ok, bad
 
 
 def describe(ms: list) -> str:

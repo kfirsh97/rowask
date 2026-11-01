@@ -140,6 +140,16 @@ DB_PROFILE=superstore python eval.py --notes on    # with the dictionary
 DB_PROFILE=superstore python eval.py --notes off   # without it: the "before" score
 ```
 
+| Run (Claude Sonnet 5.5, 1 Nov 2026) | Score | Trap questions | Metric questions |
+|---|---|---|---|
+| Without notes or dictionary (`--notes off`) | 16 / 19 | 10 / 10 | 1 / 3 |
+| With them (`--notes on`) | **19 / 19** | **10 / 10** | **3 / 3** |
+
+Without the dictionary the agent guessed "active" as the last 12 months (704 customers instead of 442) and, asked
+for the late shipment rate, rightly said the data doesn't define "late" and offered options. With it, both match the
+agreed definitions. (The third miss was Canada's sales picked from a table of every country; the prompt now asks for
+a final query that returns just the answer.)
+
 ## Checking every answer
 
 The answer key measures the agent; these checks run on **every answer**, on the database itself, no model call
