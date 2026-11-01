@@ -416,6 +416,8 @@ def md(text):
     # No HTML is rendered, and no images: ![](https://x/?d=...) would make the browser fetch that address on its own,
     # carrying whatever an uploaded file got the model to put in it. Shown as a plain link instead (needs a click).
     text = plain(text or "")
+    # "$740K ... $692K": Streamlit reads text between two dollar signs as LaTeX math. Money is not math.
+    text = re.sub(r"(?<!\\)\$", r"\\$", text)
     if is_hebrew(text):
         # Right-to-left by a CSS rule on a keyed container. The key follows the order of the texts on the page, so it
         # stays the same from one run to the next and nothing is redrawn needlessly.

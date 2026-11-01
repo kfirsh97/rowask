@@ -1,15 +1,32 @@
 # RowAsk 🤖 – ask your database in plain language
 
+**▶ Try it live: [rowask.streamlit.app](https://rowask.streamlit.app)** – no sign-up; open a sample database or upload
+your own CSV/Excel file. (A free server: if it has been idle, it takes ~30 seconds to wake up.)
+
 **RowAsk** is an AI agent that answers business questions about a database — in Hebrew or English. It reads the
 schema, writes the SQL, runs it, checks its own result, fixes its own errors, and answers with the query it used, so
 every answer can be verified. It works on SQL Server, PostgreSQL, SQLite and MySQL, or on your own CSV, Excel and SQL
 files uploaded in the page. It was first built on my [Porsche sales database](https://github.com/kfirsh97/porsche-sales-database),
-an SQL course project, which is still its main benchmark (12/12 on questions with known answers).
+an SQL course project, which is still its main benchmark.
+
+**Measured, not assumed:** 12/12 on the Porsche answer key, and 19/19 on a Superstore key built around traps and
+business definitions (16/19 without the metric dictionary) - [how it's measured](#measuring-accuracy).
+
+<p align="center"><img src="docs/answer.png" width="720" alt="An answer: the text, the assumptions it made, an automatic check, a chart drawn from the query's real rows"></p>
+
+**Click to drill down** – region → its states → their cities, by rewriting the answer's own SQL (no model call):
+
+<p align="center"><img src="docs/drill.gif" width="620" alt="Clicking West shows its states, clicking California shows its cities"></p>
+
+| | |
+|---|---|
+| <img src="docs/forecast.png" alt="A forecast with its range"><br>**Forecasts and statistical tests** – prepared analyses, with honest ranges and verdicts | <img src="docs/hebrew-check.png" alt="A Hebrew answer with a warning that 2023 is incomplete"><br>**Hebrew, right to left** – and a check that catches an incomplete year |
+| <img src="docs/dashboard.png" alt="A dashboard with stat tiles, a donut, a US map, a heatmap and a line"><br>**Dashboards** that rerun live, with pie, map and heatmap | <img src="docs/home.png" alt="The home page"><br>**Start anywhere** – upload a file or open a sample |
+| <img src="docs/sql-panel.png" alt="The editable SQL with Run, Excel and CSV"><br>**The SQL behind every answer** – edit it, rerun it, download the whole result | <img src="docs/metrics.png" alt="The metric dictionary in the sidebar"><br>**A metric dictionary** – one agreed definition per business number |
 
 **What it does**
 
 - **A home page** to upload your own files or open a sample database (Porsche sales, a music store)
-
 - **Chat** with follow-up questions, in a Streamlit web page or on the command line
 - **Any database**, with a small profile file for what the data means; or **upload** CSV, Excel, SQL scripts, SQLite
 - **Charts** drawn from the real rows (bar, line, pie, US and world maps, heatmap...), a chart-type switcher, and
@@ -20,7 +37,12 @@ an SQL course project, which is still its main benchmark (12/12 on questions wit
   shown in one line
 - **Forecasts and statistical tests**: prepared analyses the agent picks from - it never runs its own code
 - **A metric dictionary**: one agreed definition per business number, used on every question
-- **Answer keys** that measure accuracy, including trap questions: 12/12 on Porsche, 16/16 on the first 16 Superstore questions
+- **Answer keys** that measure accuracy, including trap questions
+- **Hardened for a public site**: read-only on three layers, question limits, three rounds of independent code
+  review with a test for every finding
+
+*Screenshots: the app on the sample databases; the answer text in them is illustrative, the charts, tables, checks
+and numbers are the app's real output.*
 
 ```
 $ python agent.py "כמה מכירות היו בכל שנה?"
