@@ -226,3 +226,21 @@ def test_stop_request_ends_the_run_before_the_next_model_call(monkeypatch, tmp_p
     assert [s["tool"] for s in r["steps"]] == ["run_query"] and r["final_sql"] is None
     # a stopped turn is not sent back to the model as conversation history
     assert agent._history_pairs([{"question": "q", "answer": agent.STOPPED}]) == []
+
+
+def test_an_analysis_belongs_to_the_answer_only_if_it_came_last(monkeypatch, tmp_path):
+    """Analyze, then a check query: the answer rests on the query. Analyze last: its query is the answer's SQL."""
+    import analysis
+    monkeypatch.setattr(agent, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(agent, "run_query", lambda sql: {"columns": ["n"], "rows": [{"n": 1}], "row_count": 1,
+                                                         "truncated": False})
+    monkeypatch.setattr(analysis, "run", lambda args: {"kind": "forecast", "summary": "up", "warnings": []})
+    fc = {"kind": "forecast", "sql": "SELECT m, s FROM t", "x": "m", "y": "s"}
+
+    r = agent.ask("forecast", client=fake_client([([("analyze", fc)], None), ([], "Up.")]), verbose=False)
+    assert r["analysis"] == fc and r["final_sql"] == "SELECT m, s FROM t" and r["analysis_result"]["summary"] == "up"
+
+    r = agent.ask("forecast", client=fake_client([([("analyze", fc)], None),
+                                                  ([("run_query", {"sql": "SELECT 1 AS n"})], None),
+                                                  ([], "Up.")]), verbose=False)
+    assert r["analysis"] is None and r["final_sql"] == "SELECT 1 AS n"

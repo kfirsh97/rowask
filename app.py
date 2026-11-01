@@ -755,7 +755,7 @@ def run_live(question, status, live, history, job):
             rec["checks"] = checks.run(r["final_sql"], rec["columns"], rec["rows"])
         except Exception:
             pass
-    if r.get("analysis"):
+    if r.get("analysis") and not r.get("analysis_result"):      # older records: run it once more
         import analysis
         res = analysis.run(r["analysis"])
         rec["analysis_result"] = None if "error" in res else res

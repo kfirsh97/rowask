@@ -99,3 +99,47 @@ def test_data_that_cannot_support_the_analysis_is_refused_clearly(args, message)
 def test_the_agent_can_call_it_and_the_step_reads_well():
     r = agent.call_tool("analyze", {"kind": "correlation", "sql": "SELECT x, y FROM pairs", "x": "x", "y": "y"})
     assert agent._summary(r).startswith("correlation: Strong positive relationship")
+
+
+def _db(tmp_path, monkeypatch, script):
+    path = tmp_path / "x.sqlite"
+    con = sqlite3.connect(path)
+    con.executescript(script)
+    con.commit(); con.close()
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{path}")
+    db._engine_for.cache_clear()
+
+
+def test_review_findings(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch, """
+        CREATE TABLE m (month TEXT, sales REAL);
+        INSERT INTO m VALUES ('2025-01', 10), ('2025-02', NULL), ('2025-03', 30), ('2025-04', 40), ('2025-05', 50),
+                             ('2025-06', 60), ('2025-08', 80);
+        CREATE TABLE g (grp TEXT, v REAL, V2 REAL);
+        INSERT INTO g VALUES ('a', 1, 1), ('a', 1, 2), ('a', 1, 3), ('b', 10, 4), ('b', 10, 5), ('b', 10, 6),
+                             (NULL, 5, 7);
+        CREATE TABLE y (yr REAL, s REAL);
+        INSERT INTO y VALUES (2019.0, 10), (2020.0, 20), (2021.0, 30), (2022.0, 40), (2023.0, 50);
+    """)
+    # an empty value is not a zero, and a missing month is not a zero either
+    assert "empty for 2025-02" in analysis.run({"kind": "forecast", "sql": "SELECT month, sales FROM m",
+                                                "x": "month", "y": "sales"})["error"]
+    assert "gaps (2025-02, 2025-07)" in analysis.run({"kind": "forecast", "sql": "SELECT month, sales FROM m WHERE sales IS "
+                                             "NOT NULL", "x": "month", "y": "sales"})["error"]
+    # years that come back as 2023.0 (PostgreSQL's EXTRACT); a perfect fit still gets a range, never below zero
+    r = analysis.run({"kind": "forecast", "sql": "SELECT yr, s FROM y", "x": "yr", "y": "s"})
+    assert r["forecast"][0]["period"] == "2024" and r["forecast"][0]["high"] > r["forecast"][0]["low"] >= 0
+    # constant groups: no "p = nan", and no NULL group
+    r = analysis.run({"kind": "compare_groups", "sql": "SELECT grp, v FROM g", "group": "grp", "value": "v"})
+    assert "nan" not in r["summary"] and r["significant"] and {t["group"] for t in r["groups"]} == {"a", "b"}
+    assert any("no group" in w for w in r["warnings"])
+    # columns that differ only by case are kept apart
+    r = analysis.run({"kind": "correlation", "sql": "SELECT v, V2 FROM g", "x": "v", "y": "V2"})
+    assert r["pearson_r"] < 0.99
+
+
+def test_pearson_and_spearman_disagreeing_is_said_plainly(tmp_path, monkeypatch):
+    rows = ", ".join(f"({x}, {x ** 6})" for x in range(1, 21))        # always rising, far from a straight line
+    _db(tmp_path, monkeypatch, f"CREATE TABLE c (x REAL, y REAL); INSERT INTO c VALUES {rows};")
+    r = analysis.run({"kind": "correlation", "sql": "SELECT x, y FROM c", "x": "x", "y": "y"})
+    assert "Spearman rho = 1.00" in r["summary"]

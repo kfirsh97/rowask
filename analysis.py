@@ -9,7 +9,6 @@ Every result has a plain-language `summary` (what the agent tells the user), the
 when the data is too thin to trust the result.
 """
 import math
-import re
 
 import numpy as np
 import pandas as pd
@@ -23,18 +22,30 @@ class AnalysisError(ValueError):
     """The analysis can't run on this data - the message says why, so the agent can fix its query."""
 
 
+MAX_ROWS = 100_000
+
+
 def _frame(sql: str) -> pd.DataFrame:
     import tools
-    cols, rows = tools.run_query_all(sql, max_rows=100_000)
+    cols, rows = tools.run_query_all(sql, max_rows=MAX_ROWS + 1)
     if not rows:
         raise AnalysisError("The query returned no rows.")
+    if len(rows) > MAX_ROWS:
+        raise AnalysisError(f"The query returned more than {MAX_ROWS:,} rows. Narrow it (a period, a sample of "
+                            "groups) - the analysis would otherwise see only part of the data.")
     return pd.DataFrame([list(r) for r in rows], columns=cols)
 
 
 def _column(df: pd.DataFrame, name: str, role: str) -> str:
     if not name:
         raise AnalysisError(f"Name the {role} column.")
-    found = {c.lower(): c for c in df.columns}.get(str(name).lower())
+    cols = [str(c) for c in df.columns]
+    if name in cols:                                    # exact first: Sales and sales can both be columns
+        return name
+    same = [c for c in cols if c.lower() == str(name).lower()]
+    found = same[0] if len(same) == 1 else None
+    if len(same) > 1:
+        raise AnalysisError(f"'{name}' matches more than one column ({', '.join(same)}) - use the exact name.")
     if not found:
         raise AnalysisError(f"The query has no column '{name}' (it has: {', '.join(map(str, df.columns))}).")
     return found
@@ -58,7 +69,7 @@ def _fmt(v: float) -> str:
 # ------------------------------------------------------------------ forecast
 def _periods(labels: pd.Series):
     """('month' | 'year', sortable period index) for labels like 2025-03, 2025, or dates on the 1st of a month."""
-    text = labels.astype(str).str.strip()
+    text = labels.astype(str).str.strip().str.replace(r"^((?:19|20)\d\d)\.0+$", r"\1", regex=True)   # 2023.0
     if text.str.fullmatch(r"(19|20)\d\d").all():
         return "year", pd.PeriodIndex(text.astype(int), freq="Y")
     if text.str.fullmatch(r"(19|20)\d\d-\d\d").all():
@@ -69,8 +80,10 @@ def _periods(labels: pd.Series):
         dates = pd.to_datetime(text, errors="coerce")
     if dates.notna().all() and (dates.dt.day == 1).all():
         return "month", pd.PeriodIndex(dates, freq="M")
-    raise AnalysisError("A forecast needs one row per month (2025-03) or per year (2025). Group the query by month "
-                        "or year, e.g. strftime('%Y-%m', date) in SQLite or FORMAT(date, 'yyyy-MM') in SQL Server.")
+    raise AnalysisError(f"A forecast needs one row per month (2025-03) or per year (2025); the period column has "
+                        f"values like {', '.join(text.head(3))}. Group the query by month or year, e.g. "
+                        "strftime('%Y-%m', date) in SQLite, FORMAT(date, 'yyyy-MM') in SQL Server, "
+                        "to_char(date, 'YYYY-MM') in PostgreSQL.")
 
 
 def forecast(df, x, y, periods=3):
@@ -78,12 +91,18 @@ def forecast(df, x, y, periods=3):
     periods = max(1, min(int(periods or 3), MAX_FORECAST))
     kind, idx = _periods(df[x])
     values = _numbers(df, y)
-    s = pd.Series(values.to_numpy(dtype=float), index=idx).groupby(level=0).sum().sort_index()
+    s = pd.Series(values.to_numpy(dtype=float), index=idx)
+    if s.isna().any():                  # an empty value is not a zero: refuse rather than invent a drop
+        missing = ", ".join(str(p) for p in s[s.isna()].index[:5])
+        raise AnalysisError(f"{y} is empty for {missing}. Fill those {kind}s in the query (COALESCE(..., 0) if zero "
+                            "is really right) or leave them out of the range.")
+    s = s.groupby(level=0).sum().sort_index()
     full = pd.period_range(s.index.min(), s.index.max(), freq=s.index.freq)
     warnings = []
     if len(full) != len(s):
-        warnings.append(f"{len(full) - len(s)} {kind}(s) had no rows and were counted as 0.")
-        s = s.reindex(full, fill_value=0.0)
+        gaps = ", ".join(str(p) for p in full.difference(s.index)[:5])
+        raise AnalysisError(f"The history has gaps ({gaps}): those {kind}s have no row. If nothing happened then, "
+                            "return them with 0; otherwise forecast from a range without gaps.")
     need = 6 if kind == "month" else 4
     if len(s) < need:
         raise AnalysisError(f"A forecast needs at least {need} {kind}s of history; the query has {len(s)}.")
@@ -103,13 +122,19 @@ def forecast(df, x, y, periods=3):
         fitted = intercept + slope * t
         ahead = intercept + slope * np.arange(len(s), len(s) + periods)
     resid = s.to_numpy() - np.asarray(fitted)
-    sigma = float(np.sqrt(np.mean(resid ** 2)))
+    # The spread of the model's misses on the history, with a floor: a near-perfect fit would otherwise promise a
+    # range of zero, which no real future has.
+    sigma = max(float(np.sqrt(np.mean(resid ** 2))), 0.02 * float(np.mean(np.abs(s.to_numpy()))))
+    never_negative = bool((s >= 0).all())
     future = pd.period_range(s.index.max() + 1, periods=periods, freq=s.index.freq)
     rows = []
     for h, (p, v) in enumerate(zip(future, ahead), 1):
         band = 1.96 * sigma * math.sqrt(h)                     # ~95%, widening the further ahead
+        low = float(v) - band
+        if never_negative:              # sales, counts: a history that never went below zero won't start now
+            low = max(low, 0.0)
         rows.append({"period": str(p), "forecast": round(float(v), 2),
-                     "low": round(float(v) - band, 2), "high": round(float(v) + band, 2)})
+                     "low": round(low, 2), "high": round(float(v) + band, 2)})
     if len(s) < 2 * need:
         warnings.append(f"Only {len(s)} {kind}s of history - treat the forecast as a rough direction.")
     if not seasonal and kind == "month":
@@ -129,7 +154,10 @@ def forecast(df, x, y, periods=3):
 def compare_groups(df, group, value):
     from scipy import stats
     g, v = _column(df, group, "group"), _column(df, value, "value")
-    data = pd.DataFrame({"g": df[g].astype(str), "v": _numbers(df, v)}).dropna()
+    data = pd.DataFrame({"g": df[g], "v": _numbers(df, v)})
+    dropped = int(data.isna().any(axis=1).sum())          # no group, or no value: not an observation of anything
+    data = data.dropna()
+    data["g"] = data["g"].astype(str)
     groups = {k: s.to_numpy(dtype=float) for k, s in data.groupby("g")["v"]}
     if len(groups) < 2:
         raise AnalysisError("Comparing needs at least two groups. The query should return one row per observation "
@@ -144,12 +172,22 @@ def compare_groups(df, group, value):
               "std": round(float(a.std(ddof=1)), 2)} for k, a in groups.items()]
     arrays = list(groups.values())
     warnings = [f"Group {t['group']} has only {t['n']} rows." for t in table if t["n"] < 20]
+    if dropped:
+        warnings.append(f"{dropped:,} rows with no group or no value were left out.")
+    if all(a.std() == 0 for a in arrays):                 # every group is constant: no test is needed or possible
+        means = {k: float(a[0]) for k, a in groups.items()}
+        same = len(set(means.values())) == 1
+        summary = ("Every row has the same value - there is no difference to test." if same else
+                   f"Within each group every row has the same {v} ({', '.join(f'{k} {_fmt(m)}' for k, m in means.items())}),"
+                   " so the groups differ completely; a significance test doesn't apply.")
+        return {"kind": "compare_groups", "group": g, "value": v, "groups": table, "tests": {},
+                "significant": not same, "summary": summary, "warnings": warnings}
     if len(groups) == 2:
         (na, a), (nb, b) = groups.items()
         t = stats.ttest_ind(a, b, equal_var=False)
         u = stats.mannwhitneyu(a, b, alternative="two-sided")
         pooled = math.sqrt(((len(a) - 1) * a.var(ddof=1) + (len(b) - 1) * b.var(ddof=1)) / (len(a) + len(b) - 2))
-        d = (a.mean() - b.mean()) / pooled if pooled else 0.0
+        d = (a.mean() - b.mean()) / pooled                    # pooled > 0 here: not every group is constant
         p_main, p_rank = float(t.pvalue), float(u.pvalue)
         tests = {"welch_t_test_p": p_main, "mann_whitney_p": p_rank, "cohens_d": round(float(d), 3)}
         diff = a.mean() - b.mean()
@@ -170,6 +208,9 @@ def compare_groups(df, group, value):
         low = min(table, key=lambda r: r["mean"])
         head = f"Average {v} ranges from {_fmt(low['mean'])} ({low['group']}) to {_fmt(top['mean'])} ({top['group']})."
         size = None
+    if math.isnan(p_main) or math.isnan(p_rank):        # e.g. one group constant: use the test that is defined
+        p_main = p_rank if math.isnan(p_main) else p_main
+        p_rank = p_main if math.isnan(p_rank) else p_rank
     both = p_main < ALPHA and p_rank < ALPHA
     neither = p_main >= ALPHA and p_rank >= ALPHA
     verdict = ("The difference is statistically significant" if both else
@@ -192,12 +233,18 @@ def correlation(df, x, y):
         raise AnalysisError("One of the columns has the same value in every row.")
     pr, sr = stats.pearsonr(data["x"], data["y"]), stats.spearmanr(data["x"], data["y"])
     r, rho = float(pr.statistic), float(sr.statistic)
-    strength = "very weak" if abs(r) < 0.1 else "weak" if abs(r) < 0.3 else "moderate" if abs(r) < 0.5 else "strong"
-    direction = "goes up" if r > 0 else "goes down"
-    sig = pr.pvalue < ALPHA
-    summary = (f"{strength.capitalize()} {'positive' if r > 0 else 'negative'} relationship between {x} and {y} "
-               f"(Pearson r = {r:.2f}, {_p(pr.pvalue)}; Spearman rho = {rho:.2f}; {len(data):,} rows): as {x} "
-               f"rises, {y} {direction}" + ("" if sig else ", though this could be chance") +
+    def word(c):
+        return "very weak" if abs(c) < 0.1 else "weak" if abs(c) < 0.3 else "moderate" if abs(c) < 0.5 else "strong"
+    # Pearson measures a straight line, Spearman any steady rise or fall; when they disagree, say both.
+    lead = rho if abs(rho) > abs(r) else r
+    direction = "goes up" if lead > 0 else "goes down"
+    sig = min(pr.pvalue, sr.pvalue) < ALPHA
+    shape = (f"{word(lead)} {'positive' if lead > 0 else 'negative'} relationship" if word(r) == word(rho) else
+             f"{word(rho)} {'positive' if rho > 0 else 'negative'} relationship in rank order, {word(r)} as a straight "
+             "line")
+    summary = (f"{shape[0].upper() + shape[1:]} between {x} and {y} (Pearson r = {r:.2f}, {_p(pr.pvalue)}; Spearman "
+               f"rho = {rho:.2f}, {_p(sr.pvalue)}; {len(data):,} rows): as {x} rises, {y} {direction}" +
+               ("" if sig else ", though this could be chance") +
                ". A correlation shows the two move together, not that one causes the other.")
     return {"kind": "correlation", "x": x, "y": y, "n": len(data), "pearson_r": round(r, 4), "pearson_p": float(pr.pvalue),
             "spearman_rho": round(rho, 4), "spearman_p": float(sr.pvalue), "significant": bool(sig),
@@ -207,7 +254,8 @@ def correlation(df, x, y):
 # ------------------------------------------------------------------ unusual values
 def outliers(df, label, value):
     lab, val = _column(df, label, "label"), _column(df, value, "value")
-    data = pd.DataFrame({"label": df[lab].astype(str), "value": _numbers(df, val)}).dropna()
+    data = pd.DataFrame({"label": df[lab].where(df[lab].notna(), "(no name)").astype(str),
+                         "value": _numbers(df, val)}).dropna()
     if len(data) < 8:
         raise AnalysisError(f"Finding unusual values needs at least 8 rows; the query has {len(data)}.")
     med = float(data["value"].median())
@@ -251,7 +299,10 @@ def run(args: dict) -> dict:
         return outliers(df, args.get("label"), args.get("value"))
     except AnalysisError as e:
         return {"error": str(e)}
-    except ValueError as e:                                  # the query was refused by the read-only checks
-        return {"error": re.sub(r"^Query rejected: ", "Query rejected: ", str(e))}
     except Exception as e:
-        return {"error": f"The analysis failed: {str(getattr(e, 'orig', None) or e)[:300]}"}
+        import tools
+        if isinstance(e, ValueError) and str(e).startswith("Query rejected"):   # refused by the read-only checks
+            return {"error": str(e)}
+        if type(e).__module__.split(".")[0] in ("sqlite3", "sqlalchemy", "pymssql", "psycopg", "pymysql"):
+            return {"error": tools._clean_error(e)}                             # the database's own message
+        return {"error": f"The analysis failed: {str(e)[:300]}"}

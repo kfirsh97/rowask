@@ -287,6 +287,8 @@ def _run_gemini(question, client, verbose, on_step=None, history=None, should_st
                 last_sql = args.get("sql")
             steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result),
                           "ok": "error" not in result})
+            if call.name == "analyze" and "error" not in result:
+                steps[-1]["analysis"] = result          # shown with the answer as is - not run a second time
             if on_step:
                 on_step(steps[-1])          # lets a UI show each step live
             if verbose:
@@ -344,6 +346,8 @@ def _run_claude(question, client, verbose, on_step=None, history=None, should_st
                 last_sql = args.get("sql")
             steps.append({"step": step, "tool": call.name, "args": args, "result": _summary(result),
                           "ok": "error" not in result})
+            if call.name == "analyze" and "error" not in result:
+                steps[-1]["analysis"] = result          # shown with the answer as is - not run a second time
             if on_step:
                 on_step(steps[-1])          # lets a UI show each step live
             if verbose:
@@ -375,10 +379,13 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
     final_sql = None if stopped else (shown[-1].strip() if shown else last_sql)
     import charts
     chart, answer = charts.parse_spec(answer)        # the chart block is for the app, not for the reader
-    # The last analysis that ran is shown with the answer (a forecast chart, a test's numbers) - rerun by the app
-    # from these arguments, so the record stays small.
-    analysis = None if stopped else next((st["args"] for st in reversed(steps)
-                                          if st["tool"] == "analyze" and st.get("ok")), None)
+    # An analysis belongs to the answer only if it was the last thing that touched the data: a query run after it
+    # (a check, a new direction) means the answer rests on that query instead. Then its query is the answer's SQL.
+    analysis = analysis_result = None
+    data_steps = [st for st in steps if st["tool"] in ("run_query", "analyze") and st.get("ok")]
+    if not stopped and data_steps and data_steps[-1]["tool"] == "analyze":
+        analysis, analysis_result = data_steps[-1]["args"], data_steps[-1].get("analysis")
+        final_sql = analysis.get("sql") or final_sql
 
     record = {
         "time": datetime.now().isoformat(timespec="seconds"),
@@ -389,6 +396,7 @@ def ask(question: str, client=None, verbose=True, provider=None, on_step=None, h
         "final_sql": final_sql,
         "chart": chart,
         "analysis": analysis,
+        "analysis_result": analysis_result,
         "steps": steps,
         "seconds": round(time.time() - started, 1),
         "stopped": stopped,
