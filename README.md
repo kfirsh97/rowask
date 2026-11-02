@@ -37,6 +37,8 @@ business definitions (16/19 without the metric dictionary) - [how it's measured]
   shown in one line
 - **Forecasts and statistical tests**: prepared analyses the agent picks from - it never runs its own code
 - **A metric dictionary**: one agreed definition per business number, used on every question
+- **A daily metrics report** that GitHub runs every morning from the same dictionary - safe to re-run, and a red
+  run (with an email) when any number can't be trusted
 - **Answer keys** that measure accuracy, including trap questions
 - **Hardened for a public site**: read-only on three layers, question limits, three rounds of independent code
   review with a test for every finding
@@ -173,6 +175,29 @@ for the late shipment rate, rightly said the data doesn't define "late" and offe
 agreed definitions. (The third miss was Canada's sales picked from a table of every country; the prompt now asks for
 a final query that returns just the answer.)
 
+## Daily metrics report
+
+`daily.py` computes every metric in the dictionary for one day - the day itself, the last 30 days, the 30 days
+before and the change - and keeps the history in `reports/<profile>/history.csv`, with the latest report in
+[`reports/porsche/latest.md`](reports/porsche/latest.md). GitHub Actions runs it every morning at 07:00 Israel time
+([`.github/workflows/daily-report.yml`](.github/workflows/daily-report.yml)), so no computer needs to be on, and
+every run is listed on the Actions tab with the report on its page.
+
+It follows the rules a scheduled job needs:
+
+- **The day is worked out, never written in**: yesterday by default; `--day latest` for the last day with data (the
+  Porsche sample is historical, so that's what the schedule uses); `--day 2023-11-01` to re-run a past day.
+- **Safe to run twice**: a day's rows are replaced, never added again.
+- **All or nothing**: if any metric fails, nothing is written and the run fails - red on the Actions tab, and an
+  email from GitHub. The history file is replaced in one step, so a crash can't leave half of it.
+- **Same numbers as the agent**: the definitions come from the metric dictionary, and the queries go through the
+  same read-only validator.
+- **Alerts**: a 30-day change of 50% or more (`--alert-pct`) is flagged in the report.
+
+```
+python daily.py --profile porsche --day latest
+```
+
 ## Analyses: forecast, comparing groups, correlation, unusual values
 
 Some questions SQL can't answer honestly on its own: *what will sales be next quarter*, *is the East really more
@@ -239,6 +264,7 @@ python -m pytest tests         # 123 tests (3 need a PostgreSQL server), no API 
 | `upload.py` | Uploads on the web page: reading CSV/Excel, cleaning, building the session's database, describing it |
 | `sqlimport.py` | SQL scripts from any dialect into SQLite: splitting, translating, IDENTITY values, foreign keys, the guard |
 | `drill.py` | Drill-down: finds the next level in the data and rewrites the query for the clicked bar |
+| `daily.py` · `reports/` · `.github/workflows/` | The daily metrics report, its history, and the schedule that runs it |
 | `exports.py` | Excel and CSV downloads of a whole query result |
 | `charts.py` · `dashboards.py` | Charts drawn from query rows (form, palette, marks); pinned dashboards and the HTML export |
 | `data/` | SQLite copies: Porsche (built by `setup/build_sqlite.py`) and the Chinook sample database |

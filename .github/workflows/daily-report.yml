@@ -1,0 +1,36 @@
+# The daily metrics report (daily.py), run by GitHub every morning - no computer needs to be on.
+# A failed run shows red on the Actions tab, and GitHub emails the repository owner.
+name: Daily metrics report
+
+on:
+  schedule:
+    - cron: "0 5 * * *"          # 05:00 UTC = 07:00 in Israel in winter, 08:00 in summer
+  workflow_dispatch:              # a "Run workflow" button on the Actions tab
+
+permissions:
+  contents: write                 # to commit the report
+
+concurrency:
+  group: daily-report             # never two runs writing the same history at once
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # The Porsche sample is historical, so the report day is the last day with data, not yesterday.
+      - run: python daily.py --profile porsche --day latest
+      - name: Commit the report if it changed
+        run: |
+          git add reports
+          if git diff --cached --quiet; then echo "No change in the report."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Daily metrics report"
+          git push

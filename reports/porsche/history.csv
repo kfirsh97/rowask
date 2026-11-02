@@ -1,0 +1,4 @@
+report_day,metric,unit,day,last_30_days,previous_30_days,change_pct,all_time
+2023-11-22,Revenue,USD,827000.0,16921767.0,16894601.0,0.2,445862669.0
+2023-11-22,Cars sold,,6.0,139.0,154.0,-9.7,4554.0
+2023-11-22,Average sale price,USD,137833.33,121739.33,109705.2,11.0,97905.72
