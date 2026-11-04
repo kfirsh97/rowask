@@ -27,6 +27,8 @@ DEFAULTS = {
     "database_url": "",
     "answer_key": False,       # True only where eval_questions.py has the answer key for this database
     "metrics": [],             # the metric dictionary: [[metrics]] tables, see metrics.py
+    "report": {},              # optional: a BI report shown on the Dashboard tab, {title, embed_url, url} - see
+                               # check_report(); for a report built elsewhere (Data Studio) on the same data
     "drill": [],               # optional drill-down levels, e.g. [["Region", "State_Province", "City"]] -
                                # without it, the levels are found in the data (drill.py)
 }
@@ -72,4 +74,25 @@ def _load(name: str) -> dict:
         metrics.parse(data.get("metrics"))
     except ValueError as e:
         raise ValueError(f"{path.name}: {e}") from None
+    try:
+        check_report(data.get("report") or {})
+    except ValueError as e:
+        raise ValueError(f"{path.name}: {e}") from None
     return {**DEFAULTS, "name": path.stem, **data}
+
+
+# Hosts whose embed pages may be shown in the app: an iframe of any other address is refused.
+REPORT_HOSTS = ("https://datastudio.google.com/embed/", "https://lookerstudio.google.com/embed/")
+
+
+def check_report(report: dict) -> None:
+    """A [report] table: title and embed_url required (a Data Studio embed link), url (the normal link) optional."""
+    if not report:
+        return
+    unknown = set(report) - {"title", "embed_url", "url"}
+    if unknown:
+        raise ValueError(f"[report]: unknown setting(s) {', '.join(sorted(unknown))}")
+    if not report.get("title") or not report.get("embed_url"):
+        raise ValueError("[report] needs a title and an embed_url")
+    if not str(report["embed_url"]).startswith(REPORT_HOSTS):
+        raise ValueError("[report] embed_url must be a Data Studio embed link (https://datastudio.google.com/embed/...)")

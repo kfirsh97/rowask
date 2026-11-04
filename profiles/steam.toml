@@ -36,6 +36,12 @@ notes = """
 """
 
 # The metric dictionary (metrics.py): one agreed definition per business number, in BigQuery SQL.
+# The dashboard built on the same warehouse in Data Studio, shown on the Dashboard tab.
+[report]
+title = "Steam games dashboard (Data Studio)"
+embed_url = "https://datastudio.google.com/embed/reporting/3558ee11-58dd-4977-890f-38206f217126"
+url = "https://datastudio.google.com/reporting/3558ee11-58dd-4977-890f-38206f217126"
+
 [[metrics]]
 name = "Peak players"
 definition = "The highest number of players at once in the period - the maximum of the daily peaks, never a sum."

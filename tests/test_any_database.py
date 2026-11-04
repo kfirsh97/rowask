@@ -212,3 +212,12 @@ def test_postgres_server_refuses_a_second_statement_itself(monkeypatch):
     use(monkeypatch, profile="generic", url=POSTGRES)
     with pytest.raises(Exception, match="multiple commands|cannot insert multiple"):
         db.fetch("SELECT 1; SELECT 2", 5)
+
+
+def test_report_settings_are_checked():
+    assert dbprofile.load_profile("steam_demo")["report"]["embed_url"].startswith("https://datastudio.google.com/embed/")
+    dbprofile.check_report({})
+    for bad in ({"title": "x"}, {"title": "x", "embed_url": "https://evil.example/embed/"},
+                {"title": "x", "embed_url": "https://datastudio.google.com/embed/r", "colour": "red"}):
+        with pytest.raises(ValueError):
+            dbprofile.check_report(bad)

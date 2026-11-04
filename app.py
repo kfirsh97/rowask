@@ -866,8 +866,22 @@ def card_controls(item):
     drop.button("Remove", icon=":material/close:", key=f"x{item['id']}", on_click=unpin, args=(item["id"],))
 
 
+def render_report(report):
+    """A BI report built on the same data (Data Studio), embedded above the pinned answers."""
+    head, link = st.columns([4, 1.6], vertical_alignment="center")
+    head.markdown(f"**{esc(report['title'])}**")
+    if report.get("url"):
+        link.link_button("Open in Data Studio", report["url"], icon=":material/open_in_new:")
+    st.iframe(report["embed_url"], height=620)
+
+
 def render_dashboard():
     items = dash_items()
+    if PROFILE.get("report"):
+        render_report(PROFILE["report"])
+        if not items:
+            st.caption("Under the report: answers you pin from the chat (**Add to dashboard**), run live on this data.")
+            return
     if not items:
         st.info("Nothing here yet. In the chat, ask for something - a total, a trend, a comparison - and press "
                 "**Add to dashboard** under the answer. Every item runs its query again whenever the dashboard "
