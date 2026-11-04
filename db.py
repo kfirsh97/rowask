@@ -102,6 +102,9 @@ def _expand(url: str) -> str:
 
 def _bigquery_engine(url):
     """BigQuery through our own client, so every query carries a scan limit, a timeout and the default dataset."""
+    import warnings
+    # The faster download path needs another package; for answers of up to a few hundred rows the plain one is fine.
+    warnings.filterwarnings("ignore", message="Cannot create BigQuery Storage client")
     try:
         from google.cloud import bigquery
         import sqlalchemy_bigquery  # noqa: F401
