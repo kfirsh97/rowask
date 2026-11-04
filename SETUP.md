@@ -173,6 +173,7 @@ DATABASE_URL=postgresql://agent_reader:password@db.example.com:5432/shop
 | SQL Server | `mssql://user:password@host:1433/dbname` | included |
 | SQLite | `sqlite:///path/to/file.db` (relative to the repository folder, or absolute) | built in |
 | MySQL / MariaDB | `mysql://user:password@host:3306/dbname` | `pip install pymysql` |
+| BigQuery | `bigquery://project-id/dataset?location=US` | included; sign in with `gcloud auth application-default login` |
 
 Special characters in the password must be URL-encoded (`!` → `%21`, `@` → `%40`, `#` → `%23`).
 
@@ -186,6 +187,14 @@ GRANT CONNECT ON DATABASE shop TO agent_reader;
 GRANT USAGE ON SCHEMA public TO agent_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO agent_reader;
 ```
+
+**BigQuery** is billed by the data each query scans, so every query carries a scan limit (`BIGQUERY_MAX_BYTES`,
+1 GB by default: BigQuery refuses a larger query before running it) and a 30-second timeout, and the connected
+dataset is the default, so tables are named without it. BigQuery has no read-only session: sign in with a Google
+account (or a service account) that has only the **BigQuery Data Viewer** and **BigQuery Job User** roles for the
+layer that does not depend on this code. `profiles/steam.toml` connects to the
+[steam-pipeline](https://github.com/kfirsh97/steam-pipeline) warehouse - set `DB_PROFILE=steam` and
+`GCP_PROJECT=<your-project-id>` in `.env`.
 
 **Make it accurate with a profile.** `generic` works, but the agent only sees table and column names. A profile
 tells it what they mean – on the Porsche database, these notes took accuracy from 11/12 to 12/12. Copy

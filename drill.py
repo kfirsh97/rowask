@@ -18,7 +18,8 @@ from sqlalchemy import inspect
 import db
 from dbprofile import load_profile
 
-DIALECTS = {"mssql": "tsql", "postgresql": "postgres", "sqlite": "sqlite", "mysql": "mysql", "mariadb": "mysql"}
+DIALECTS = {"mssql": "tsql", "postgresql": "postgres", "sqlite": "sqlite", "mysql": "mysql", "mariadb": "mysql",
+            "bigquery": "bigquery"}
 NESTED = 0.25          # at most this share of child values may sit under more than one parent value
 MAX_LEVEL = 5000       # a level with more distinct values than this is too fine to chart
 CODE = re.compile(r"(_id$|^id$|^id_|code|zip|postal|phone|email|mail|מיקוד|טלפון)", re.I)

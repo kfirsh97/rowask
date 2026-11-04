@@ -30,6 +30,7 @@ FORBIDDEN = [
     "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_sleep",
     "load_file",                                                         # MySQL
     "openquery", "openxml",                                              # SQL Server: linked servers, XML docs
+    "external_query", "export",                                          # BigQuery: other databases, EXPORT DATA
 ]
 
 _schema_cache = {}
@@ -220,6 +221,10 @@ def _clean_error(e: Exception) -> str:
         return f"Query stopped after {db.QUERY_TIMEOUT_S} seconds - make it cheaper (filter earlier, aggregate, or LIMIT)."
     msg = str(getattr(e, "orig", None) or e)
     msg = msg.split("DB-Lib error")[0] if "DB-Lib error" in msg else msg
+    if "bytes billed" in msg:                           # BigQuery refused the scan before running it
+        return (f"BigQuery refused the query: it would scan more than {db.BIGQUERY_MAX_BYTES:,} bytes. Select fewer "
+                "columns, or filter on a date column.")
+    msg = re.split(r"\n\s*(Location:|Job ID:)", msg)[0]     # BigQuery appends its job details
     return msg.strip()[:500]
 
 

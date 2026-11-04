@@ -303,6 +303,6 @@ def run(args: dict) -> dict:
         import tools
         if isinstance(e, ValueError) and str(e).startswith("Query rejected"):   # refused by the read-only checks
             return {"error": str(e)}
-        if type(e).__module__.split(".")[0] in ("sqlite3", "sqlalchemy", "pymssql", "psycopg", "pymysql"):
+        if type(e).__module__.split(".")[0] in ("sqlite3", "sqlalchemy", "pymssql", "psycopg", "pymysql", "google"):
             return {"error": tools._clean_error(e)}                             # the database's own message
         return {"error": f"The analysis failed: {str(e)[:300]}"}

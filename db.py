@@ -6,15 +6,18 @@ Which database (first match wins):
        postgresql://agent_reader:password@localhost:5432/shop
        mssql+pymssql://agent_reader:password@localhost:1433/Porsche
        sqlite:///data/porsche.sqlite          (a path relative to the repository folder, or an absolute one)
+       bigquery://my-project/marts?location=US (a BigQuery dataset; signs in with gcloud application-default login)
   2. DB_USER / DB_PASSWORD / DB_HOST / DB_PORT / DB_NAME - the original SQL Server settings, still supported
   3. the database_url in the active profile (profiles/<DB_PROFILE>.toml)
 
 Read-only, three ways: the agent's own validator (tools.py) lets through only single SELECTs; SQLite files are
 opened read-only and PostgreSQL sessions start read-only; and for any server you connect a read-only user.
-Every query is stopped after QUERY_TIMEOUT_S seconds.
+Every query is stopped after QUERY_TIMEOUT_S seconds. On BigQuery, where each query is billed by the data it scans,
+a query that would scan more than BIGQUERY_MAX_BYTES is refused by BigQuery before it runs.
 """
 import contextvars
 import os
+import re
 import sqlite3
 import time
 from functools import lru_cache
@@ -30,6 +33,7 @@ load_dotenv()
 HERE = Path(__file__).parent
 QUERY_TIMEOUT_S = 30
 LOGIN_TIMEOUT_S = 10
+BIGQUERY_MAX_BYTES = int(os.environ.get("BIGQUERY_MAX_BYTES", 1_000_000_000))   # 1 GB a query: far above this data
 
 # Default driver for each database type, so a plain "postgresql://..." or "mssql://..." URL just works.
 DRIVERS = {"postgresql": "postgresql+psycopg", "postgres": "postgresql+psycopg",
@@ -45,6 +49,10 @@ DIALECT_HINTS = {
               "today = date('now'). Integer division truncates - multiply by 1.0 for averages and ratios.",
     "mysql": "MySQL. Use LIMIT n. Year of a date: YEAR(col). Today: CURDATE(). Quote identifiers with backticks.",
     "mariadb": "MariaDB. Use LIMIT n. Year of a date: YEAR(col). Today: CURDATE(). Quote identifiers with backticks.",
+    "bigquery": "Google BigQuery (GoogleSQL). Use LIMIT n. Year of a date: EXTRACT(YEAR FROM col). Today: CURRENT_DATE(). "
+                "Name tables without a dataset (the connected dataset is the default). Quote names with backticks. "
+                "Use SAFE_DIVIDE(a, b) for ratios; / always returns a decimal. Every query is billed by the columns it "
+                "reads, so select only the columns you need - never SELECT *.",
 }
 
 
@@ -67,7 +75,7 @@ def database_url() -> str:
     from dbprofile import load_profile
     profile = load_profile()
     if profile["name"] != "porsche" and profile.get("database_url"):
-        return profile["database_url"]          # DB_PROFILE=superstore means the Superstore file, even with DB_* set
+        return _expand(profile["database_url"])          # DB_PROFILE=superstore means the Superstore file, even with DB_* set
     if os.environ.get("DB_USER"):              # DB_* is the Porsche database on SQL Server (SETUP.md)
         user = quote_plus(os.environ["DB_USER"])
         password = quote_plus(os.environ.get("DB_PASSWORD", "").strip().strip("'\""))
@@ -77,9 +85,40 @@ def database_url() -> str:
         return f"mssql+pymssql://{user}:{password}@{host}:{port}/{name}"
     url = profile.get("database_url", "")
     if url:
-        return url
+        return _expand(url)
     raise SetupError("No database configured. Set DATABASE_URL in .env (see SETUP.md), "
                      "or pick a profile that has a database_url.")
+
+
+def _expand(url: str) -> str:
+    """A profile's URL may name settings from .env, e.g. bigquery://${GCP_PROJECT}/marts - so the project ID stays out
+    of the repository."""
+    out = os.path.expandvars(url)
+    if "${" in out:
+        missing = ", ".join(sorted(set(re.findall(r"\$\{(\w+)\}", out))))
+        raise SetupError(f"This profile's database needs {missing} in .env.")
+    return out
+
+
+def _bigquery_engine(url):
+    """BigQuery through our own client, so every query carries a scan limit, a timeout and the default dataset."""
+    try:
+        from google.cloud import bigquery
+        import sqlalchemy_bigquery  # noqa: F401
+    except ModuleNotFoundError as e:
+        raise SetupError(f"The BigQuery driver is not installed ({e.name}). Run: pip install sqlalchemy-bigquery")
+    project, dataset = url.host, url.database
+    if not project or not dataset:
+        raise SetupError("A BigQuery URL names a project and a dataset: bigquery://<project>/<dataset>")
+    config = bigquery.QueryJobConfig(maximum_bytes_billed=BIGQUERY_MAX_BYTES, job_timeout_ms=QUERY_TIMEOUT_S * 1000,
+                                     default_dataset=f"{project}.{dataset}", use_legacy_sql=False)
+    try:
+        client = bigquery.Client(project=project, location=url.query.get("location"), default_query_job_config=config)
+    except Exception as e:
+        raise SetupError(f"Could not sign in to BigQuery ({type(e).__name__}). On this computer run: "
+                         "gcloud auth application-default login")
+    url = url.update_query_dict({"user_supplied_client": "true"})
+    return create_engine(url, connect_args={"client": client})
 
 
 def _sqlite_path(url) -> Path:
@@ -112,6 +151,8 @@ def _engine_for(url_text: str):
     if backend == "sqlite":
         path = _sqlite_path(url)
         return create_engine("sqlite://", creator=lambda: _sqlite_connect(path))
+    if backend == "bigquery":
+        return _bigquery_engine(url)
     connect_args = {}
     if backend == "postgresql":
         connect_args = {"connect_timeout": LOGIN_TIMEOUT_S,
@@ -146,6 +187,8 @@ def describe() -> str:
     url = make_url(database_url())
     if url.get_backend_name() == "sqlite":
         return f"SQLite file {Path(url.database).name}"
+    if url.get_backend_name() == "bigquery":
+        return f"BigQuery dataset {url.database} in project {url.host}"
     return f"{dialect()} database {url.database} on {url.host}"
 
 

@@ -1,5 +1,6 @@
 pymssql==2.4.6
 sqlalchemy==2.0.43
+sqlalchemy-bigquery==1.17.3   # BigQuery (profiles/steam.toml)
 psycopg[binary]==3.2.10
 tomli==2.2.1; python_version < "3.11"
 pandas==2.3.3

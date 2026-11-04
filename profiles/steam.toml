@@ -1,0 +1,80 @@
+# Steam games: the warehouse built by github.com/kfirsh97/steam-pipeline (BigQuery, dataset marts).
+# Hourly player counts and daily prices for Steam's 100 most played games, cleaned and tested by dbt every morning.
+# Set GCP_PROJECT in .env and sign in once with: gcloud auth application-default login
+
+title = "Steam Games"
+description = """Chat with the Steam games warehouse in Hebrew or English: players per game per day, prices,
+discounts and sales, and how much of each day was collected. The agent writes the SQL for BigQuery,
+checks its own result, and shows the query behind every answer."""
+business = "a games analytics team tracking Steam's 100 most played games"
+database_url = "bigquery://${GCP_PROJECT}/marts?location=US"
+
+examples = [
+    "אילו 10 משחקים היו עם שיא השחקנים הגבוה ביותר אתמול?",
+    "Which games are on sale today, and how many players do they have?",
+    "מה אחוז ההנחה הממוצע של המשחקים שבמבצע?",
+    "How much of each day was actually collected?",
+    "איזה ז׳אנר הכי פופולרי לפי שחקנים?",
+]
+
+notes = """
+- Days are UTC dates (collected_on). The first days of data are partial: check collection_coverage before comparing
+  days - a day with low coverage_pct has a lower peak only because fewer hours were measured.
+- dashboard_game_daily: ONE ROW PER GAME PER DAY - the table to use for almost every question. name is the store's
+  current name. genres is one text field, e.g. 'Action, Free To Play' - match a genre with
+  REGEXP_CONTAINS(genres, r'\\bAction\\b') or LIKE '%Action%'.
+- peak_players / avg_players: the day's highest and average count of players connected to Steam, without the
+  suspicious zeros (Steam sometimes answers 0 for a game with many players). NEVER SUM peak_players across days or
+  games - use MAX for a period, or AVG for a typical day.
+- price_final_usd / price_initial_usd: price in US dollars that day, after and before discount. discount_pct: 0-100.
+  on_sale: discount_pct > 0. Free games (is_free) and games not sold in the US store have NULL price and discount.
+- top_100_rank: the game's rank in SteamSpy's top 100 that day (1 = most played over the last two weeks).
+- hours_valid: how many hourly counts that day were usable (out of 24).
+- fct_game_daily: the same rows without names; dim_games: one row per game (name, genres ARRAY, release_date,
+  developer, publisher, first/last day in the top 100). Join on appid.
+- collection_coverage: one row per day - hours_collected of hours_expected, coverage_pct, failures.
+"""
+
+# The metric dictionary (metrics.py): one agreed definition per business number, in BigQuery SQL.
+[[metrics]]
+name = "Peak players"
+definition = "The highest number of players at once in the period - the maximum of the daily peaks, never a sum."
+sql = "MAX(peak_players)"
+table = "dashboard_game_daily"
+date = "collected_on"
+aliases = ["peak", "max players", "שיא שחקנים", "שיא"]
+
+[[metrics]]
+name = "Average daily players"
+definition = "The average of the games' daily average player counts over the period."
+sql = "AVG(avg_players)"
+table = "dashboard_game_daily"
+date = "collected_on"
+aliases = ["average players", "שחקנים בממוצע", "ממוצע שחקנים"]
+
+[[metrics]]
+name = "Games on sale"
+definition = "Distinct games with a discount on at least one day of the period."
+sql = "COUNT(DISTINCT IF(on_sale, appid, NULL))"
+table = "dashboard_game_daily"
+date = "collected_on"
+aliases = ["on sale", "sales", "משחקים במבצע", "מבצעים"]
+
+[[metrics]]
+name = "Average discount"
+definition = "Average discount percent over game-days on sale (free and unpriced games left out)."
+sql = "AVG(discount_pct)"
+table = "dashboard_game_daily"
+date = "collected_on"
+filter = "on_sale"
+unit = "%"
+aliases = ["discount", "הנחה ממוצעת", "אחוז הנחה"]
+
+[[metrics]]
+name = "Data coverage"
+definition = "Share of the expected hourly runs that were collected, averaged over the days of the period."
+sql = "AVG(coverage_pct)"
+table = "collection_coverage"
+date = "collected_on"
+unit = "%"
+aliases = ["coverage", "כיסוי", "כיסוי נתונים"]

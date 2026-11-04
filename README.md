@@ -5,9 +5,10 @@ your own CSV/Excel file. (A free server: if it has been idle, it takes ~30 secon
 
 **RowAsk** is an AI agent that answers business questions about a database — in Hebrew or English. It reads the
 schema, writes the SQL, runs it, checks its own result, fixes its own errors, and answers with the query it used, so
-every answer can be verified. It works on SQL Server, PostgreSQL, SQLite and MySQL, or on your own CSV, Excel and SQL
-files uploaded in the page. It was first built on my [Porsche sales database](https://github.com/kfirsh97/porsche-sales-database),
-an SQL course project, which is still its main benchmark.
+every answer can be verified. It works on SQL Server, PostgreSQL, SQLite, MySQL and BigQuery, or on your own CSV, Excel
+and SQL files uploaded in the page. It was first built on my [Porsche sales database](https://github.com/kfirsh97/porsche-sales-database),
+an SQL course project, which is still its main benchmark. It also answers questions on the BigQuery warehouse of my
+[Steam data pipeline](https://github.com/kfirsh97/steam-pipeline) (`profiles/steam.toml`, with a gaming metric dictionary).
 
 **Measured, not assumed:** 12/12 on the Porsche answer key, and 19/19 on a Superstore key built around traps and
 business definitions (16/19 without the metric dictionary) - [how it's measured](#measuring-accuracy).
@@ -82,7 +83,7 @@ Chinook music-store database on SQLite and PostgreSQL. See [SETUP.md → Your ow
 |---|---|
 | Database user with `db_datareader` only | Any write, even if every other check failed |
 | `validate_query()` before the database | Anything that is not a single SELECT: `DELETE`, `DROP`, `SELECT INTO`, `EXEC`, stacked statements, keywords hidden in comments — while allowing those words inside strings |
-| Limits | 30 s per query, 50 rows to the model, 8 steps per question, 90 s per model call |
+| Limits | 30 s per query, 50 rows to the model, 8 steps per question, 90 s per model call; on BigQuery, a scan limit per query |
 
 **On the public demo** (every visitor is a stranger): questions are capped per visit and per day; uploads are limited
 to 100 MB, kept per browser session and swept after 6 hours; an uploaded SQL script is stopped after 120 s, and runs
