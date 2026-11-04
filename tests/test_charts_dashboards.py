@@ -197,3 +197,12 @@ def test_no_pie_for_a_measure_that_does_not_add_up():
     chart = charts.build({"type": "pie", "x": "model", "y": "avg_price"}, ["model", "avg_price"], rows)
     assert chart is not None and "arc" not in json.dumps(chart.to_dict())          # drawn as bars instead
     assert charts.additive("cars_sold") and charts.additive("Sales") and not charts.additive("conversion_rate")
+
+
+def test_one_day_is_not_a_trend():
+    cols = ["collected_on", "name", "peak_players"]
+    rows = [("2026-11-04", "Counter-Strike 2", 786590), ("2026-11-04", "PUBG", 460421), ("2026-11-04", "Apex", 135029)]
+    assert charts.auto_spec(cols, rows) == {"type": "bar", "x": "name", "y": "peak_players"}
+    assert charts.check_spec({"type": "line", "x": "collected_on", "y": "peak_players", "color": "name"}, cols, rows) is None
+    days = [("2026-11-03", "CS2", 997916), ("2026-11-04", "CS2", 786590)]
+    assert charts.auto_spec(cols, days)["type"] == "line"                  # two days still make a trend

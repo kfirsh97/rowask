@@ -168,14 +168,20 @@ def compatible(spec, columns, rows) -> list:
     return [spec["type"]] + [t for t in out if t != spec["type"]] if spec["type"] in out else out
 
 
+def _constant(df):
+    """Columns that hold a single value across two or more rows."""
+    return {c for c in df.columns if len(df) > 1 and df[c].nunique(dropna=False) <= 1}
+
+
 def auto_spec(columns, rows):
     """Pick a chart from the shape of the result, or None when a table says it better."""
     if not rows or not columns:
         return None
     df = frame(columns, rows)
-    times = [c for c in df.columns if _is_time(df, c)]
+    constant = _constant(df)                 # one value in every row (the same day, the same country): not an axis
+    times = [c for c in df.columns if _is_time(df, c) and c not in constant]
     nums = [c for c in df.columns if _numeric(df, c) and c not in times]
-    cats = [c for c in df.columns if c not in nums and c not in times]
+    cats = [c for c in df.columns if c not in nums and c not in times and c not in constant]
     if len(df) == 1 and nums:
         return {"type": "stat", "y": nums[0]}
     if not nums:
@@ -199,12 +205,17 @@ def auto_spec(columns, rows):
     return None
 
 
-def check_spec(spec, columns):
-    """Keep a model-suggested spec only if it names real columns of the result; otherwise None."""
+def check_spec(spec, columns, rows=None):
+    """Keep a model-suggested spec only if it names real columns of the result; otherwise None.
+    With the rows: also None when the x axis or the color holds one value across many rows (a "trend" over one day)."""
     if not isinstance(spec, dict) or spec.get("type") not in TYPES:
         return None
     for key in ("x", "y", "color"):
         if spec.get(key) is not None and spec[key] not in columns:
+            return None
+    if rows and len(rows) > 1 and spec["type"] not in ("stat", "scatter"):
+        constant = _constant(frame(columns, rows))
+        if spec.get("x") in constant or spec.get("color") in constant:
             return None
     if spec["type"] != "stat" and not (spec.get("x") and spec.get("y")):
         return None

@@ -487,7 +487,7 @@ def drill_level(key, spec, columns, rows, sql):
         st.session_state.drill[key] = []
         return spec, columns, rows, sql, []
     child_spec = {**spec, "x": level["child"]}
-    spec2 = charts.check_spec(child_spec, cols) or charts.auto_spec(cols, rws)
+    spec2 = charts.check_spec(child_spec, cols, rws) or charts.auto_spec(cols, rws)
     return spec2, cols, rws, level["sql"], path
 
 
@@ -713,7 +713,7 @@ def show_result(run, question=None, key=None):
         if out is not None and not isinstance(out, tuple):
             st.altair_chart(charts.style(out), width="stretch", theme=None)
     if rows and not result:            # an analysis shows its own view; its raw rows are in the SQL panel downloads
-        spec = charts.check_spec(run.get("chart"), columns) or charts.auto_spec(columns, rows)
+        spec = charts.check_spec(run.get("chart"), columns, rows) or charts.auto_spec(columns, rows)
         shown = chart_view(f"a{key}" + (f"e{edit['version']}" if edit.get("sql") else ""), spec, columns, rows, sql)
         if shown:
             spec = shown                                            # pin what is on screen, chart type included
