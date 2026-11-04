@@ -89,7 +89,8 @@ Charts:
             "pie" | "map" | "heatmap",
    "x": "<column>", "y": "<one numeric column>", "color": "<column that splits the series, or null>"}}
   line/area for change over time, bar for comparing groups, grouped/stacked bar for two groupings,
-  stat for a single number. pie only for parts of a whole (6 parts or fewer, no negative values);
+  stat for a single number. pie only for parts of a whole (6 parts or fewer, no negative values) -
+  never for an average, a rate, a share or a price, whose total means nothing;
   map for a measure by US state or by country (x = the state or country column); heatmap for a measure across
   two groupings (x and color); stacked_100 for each group's share. One measure only - never two measures
   with different scales on one chart.

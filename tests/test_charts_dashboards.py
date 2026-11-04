@@ -189,3 +189,11 @@ def test_new_forms_draw(spec, rows, mark):
     cols = [spec["x"], spec["color"], spec["y"]] if spec.get("color") else [spec["x"], spec["y"]]
     chart = charts.build(spec, cols, rows, drillable=True)
     assert chart is not None and mark in json.dumps(chart.to_dict())
+
+
+def test_no_pie_for_a_measure_that_does_not_add_up():
+    rows = [("GT2", 1_200_000.0), ("Dakar", 300_000.0), ("Carrera", 90_000.0)]
+    assert "pie" not in charts.compatible({"type": "bar", "x": "model", "y": "avg_price"}, ["model", "avg_price"], rows)
+    chart = charts.build({"type": "pie", "x": "model", "y": "avg_price"}, ["model", "avg_price"], rows)
+    assert chart is not None and "arc" not in json.dumps(chart.to_dict())          # drawn as bars instead
+    assert charts.additive("cars_sold") and charts.additive("Sales") and not charts.additive("conversion_rate")

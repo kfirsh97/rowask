@@ -10,7 +10,8 @@ the form from the shape of the result. Both follow the data-viz method this proj
   - color follows the entity (sorted domain), never its rank; past 8 series the tail folds into "Other"
   - thin bars (<= 24px, 4px rounded data end), 2px lines, >= 8px markers with a 2px surface ring,
     hairline solid gridlines, values labelled selectively, a tooltip on every mark
-  - pie only for part of a whole: at most 6 slices (the rest folds into "Other"), never with negative values
+  - pie only for part of a whole: at most 6 slices (the rest folds into "Other"), never with negative values,
+    and never for a measure that doesn't add up (an average, a rate, a share, a price, a max): its total means nothing
   - maps and heatmaps encode magnitude: one hue, light -> dark (the palette's sequential blue), never a rainbow
 compatible() lists the forms a result can honestly take, for the chart-type switcher on the page.
 """
@@ -133,6 +134,16 @@ def geo_match(values):
 
 
 # ------------------------------------------------------------------ choosing the form
+# Column names of measures whose slices don't add up to a whole: a pie of average prices shows a meaningless total.
+_NOT_ADDITIVE = re.compile(r"(^|[^a-z])(avg|average|mean|median|rate|ratio|pct|percent|percentage|share|price|"
+                           r"min|max|peak|per)([^a-z]|$)|ממוצע|אחוז|שיעור|מחיר", re.I)
+
+
+def additive(column) -> bool:
+    """Whether a measure's values can be summed into a whole (a count, revenue) - the condition for a pie."""
+    return not _NOT_ADDITIVE.search(str(column))
+
+
 def compatible(spec, columns, rows) -> list:
     """The chart forms this result can honestly take - for the chart-type switcher. The current form first."""
     if not spec or spec.get("type") == "stat" or not rows:
@@ -150,7 +161,7 @@ def compatible(spec, columns, rows) -> list:
         out += ["grouped_bar", "stacked_bar", "stacked_100", "heatmap"]
     else:
         out += ["bar"]
-        if (df[y].dropna() >= 0).all() and 2 <= df[x].nunique() <= 30:
+        if (df[y].dropna() >= 0).all() and 2 <= df[x].nunique() <= 30 and additive(y):
             out.append("pie")
         if geo_match(df[x]):
             out.append("map")
@@ -375,6 +386,8 @@ def build(spec, columns, rows, height=300, drillable=False):
 
 def _pie(df, x, y, pick, hand):
     """Part of a whole: a donut with at most 6 slices (the rest folds into 'Other'), the total in the middle."""
+    if not additive(y):
+        return None                                      # an average or a rate has no whole to split - use a bar
     df = df.groupby(x, as_index=False)[y].sum()
     if (df[y] < 0).any():
         return None                                      # a negative slice has no meaning - use a bar
