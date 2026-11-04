@@ -117,6 +117,29 @@ SAMPLES = {
     "chinook": ("Digital music store", "11 tables · 15,600 rows",
                 "Artists, albums, tracks, customers and invoices - the public Chinook sample database."),
 }
+
+
+def _steam_sample():
+    """The Steam games snapshot, when its file is here: its size is read from the file, which is re-exported often."""
+    import sqlite3
+    path = Path(__file__).parent / "data" / "steam.sqlite"
+    if not path.exists():
+        return None
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        tables = [t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")]
+        rows = sum(con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] for t in tables)
+        first, last = con.execute("SELECT MIN(collected_on), MAX(collected_on) FROM collection_coverage").fetchone()
+    finally:
+        con.close()
+    return ("Steam games", f"{len(tables)} tables · {rows:,} rows · {first} to {last}",
+            "Players, prices and sales for Steam's 100 most played games - a snapshot of a data pipeline that "
+            "collects Steam every hour (GitHub Actions, BigQuery, dbt, Airflow).")
+
+
+_STEAM = _steam_sample()
+if _STEAM:
+    SAMPLES["steam_demo"] = _STEAM
 SAMPLE = st.session_state.get("sample") if not UPLOAD else None
 # A database set up in .env (DATABASE_URL, DB_* or DB_PROFILE) is offered on the home page too.
 CONFIGURED = any(os.environ.get(k) for k in ("DATABASE_URL", "DB_USER", "DB_PROFILE"))

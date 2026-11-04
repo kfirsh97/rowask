@@ -8,7 +8,8 @@ schema, writes the SQL, runs it, checks its own result, fixes its own errors, an
 every answer can be verified. It works on SQL Server, PostgreSQL, SQLite, MySQL and BigQuery, or on your own CSV, Excel
 and SQL files uploaded in the page. It was first built on my [Porsche sales database](https://github.com/kfirsh97/porsche-sales-database),
 an SQL course project, which is still its main benchmark. It also answers questions on the BigQuery warehouse of my
-[Steam data pipeline](https://github.com/kfirsh97/steam-pipeline) (`profiles/steam.toml`, with a gaming metric dictionary).
+[Steam data pipeline](https://github.com/kfirsh97/steam-pipeline) (`profiles/steam.toml`, with a gaming metric dictionary);
+the live demo has a SQLite snapshot of it (`profiles/steam_demo.toml`), so anyone can try it without a Google account.
 
 **Measured, not assumed:** 12/12 on the Porsche answer key, and 19/19 on a Superstore key built around traps and
 business definitions (16/19 without the metric dictionary) - [how it's measured](#measuring-accuracy).
