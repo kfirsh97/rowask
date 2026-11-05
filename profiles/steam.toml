@@ -18,6 +18,16 @@ examples = [
 ]
 
 notes = """
+- Only finished UTC days are in the tables: today appears tomorrow, once its 24 hours are in.
+- 2026-11-05 is a break in the series: that day the tracked list switched from SteamSpy's top 100 to Steam's own
+  most-played chart, and 56 games changed. Comparisons of the set of games, averages over all games, or ranks
+  should start on 2026-11-06 or keep the two periods apart (list_source: 'steamspy' or 'steam').
+- full_day: the game had at least 20 usable hourly counts that day. Compare a game's players across days only on
+  full days - a game that joined or left the list mid-day has a partial, lower peak.
+- on_sale is NULL, not false, when there was no store answer for that game and day (has_store_data is false):
+  unknown, not full price. Leave those rows out of sale questions and say so if many are missing.
+- top_100_rank: the game's rank in the tracked list that day (1 = most played). From 2026-11-05 Steam's chart;
+  before, SteamSpy's two-week ranking - don't compare ranks across the switch.
 - Days are UTC dates (collected_on). The first days of data are partial: check collection_coverage before comparing
   days - a day with low coverage_pct has a lower peak only because fewer hours were measured.
 - dashboard_game_daily: ONE ROW PER GAME PER DAY - the table to use for almost every question. name is the store's
@@ -26,12 +36,9 @@ notes = """
 - peak_players / avg_players: the day's highest and average count of players connected to Steam, without the
   suspicious zeros (Steam sometimes answers 0 for a game with many players). NEVER SUM peak_players across days or
   games - use MAX for a period, or AVG for a typical day.
-- price_final_usd / price_initial_usd: price in US dollars that day, after and before discount. discount_pct: 0-100.
+- price_final_usd: price in US dollars that day after discount (fct_game_daily also has price_initial_usd, before). discount_pct: 0-100.
   on_sale: discount_pct > 0. Free games (is_free) and games not sold in the US store have NULL price and discount.
-- Prices, discounts and on_sale come from one store run per day. The newest day can have player counts but no
-  store data yet (all price_final_usd NULL): for questions about sales or prices "today", use the latest day that
-  has prices (MAX(collected_on) WHERE price_final_usd IS NOT NULL) and say which day that is.
-- top_100_rank: the game's rank in SteamSpy's top 100 that day (1 = most played over the last two weeks).
+  on_sale, full_day and has_store_data are TRUE/FALSE.
 - hours_valid: how many hourly counts that day were usable (out of 24).
 - fct_game_daily: the same rows without names; dim_games: one row per game (name, genres ARRAY, release_date,
   developer, publisher, first/last day in the top 100). Join on appid.

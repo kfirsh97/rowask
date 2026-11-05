@@ -80,6 +80,8 @@ def test_overload_is_error_not_wrong_answer(monkeypatch, tmp_path):
 
 def test_superstore_answer_key_scores_traps(monkeypatch, tmp_path):
     """The Superstore key runs on the real SQLite file: right queries pass, the classic wrong one fails."""
+    if not (Path(__file__).resolve().parents[1] / "data" / "superstore.sqlite").exists():
+        pytest.skip("build data/superstore.sqlite first (setup/csv_to_sqlite.py) - the data is not in the repo")
     from answer_keys import superstore
     monkeypatch.setenv("DB_PROFILE", "superstore")
     monkeypatch.delenv("DB_USER")

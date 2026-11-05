@@ -137,7 +137,10 @@ def _steam_sample():
             "collects Steam every hour (GitHub Actions, BigQuery, dbt, Airflow).")
 
 
-_STEAM = _steam_sample()
+try:
+    _STEAM = _steam_sample()
+except Exception:          # a broken snapshot hides the Steam card instead of breaking the home page
+    _STEAM = None
 if _STEAM:
     SAMPLES["steam_demo"] = _STEAM
 SAMPLE = st.session_state.get("sample") if not UPLOAD else None
