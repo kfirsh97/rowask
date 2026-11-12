@@ -88,5 +88,5 @@ def test_the_steam_profile_and_its_metrics_parse():
     assert p["database_url"].startswith("bigquery://${GCP_PROJECT}/marts")
     ms = metrics.parse(p["metrics"])
     assert {m["name"] for m in ms} == {"Peak players", "Average daily players", "Games on sale", "Average discount",
-                                       "Data coverage"}
+                                       "Players vs normal", "Data coverage"}
     assert "NEVER SUM peak_players" in p["notes"]
