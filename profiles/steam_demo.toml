@@ -41,6 +41,9 @@ notes = """
 - price_final_usd: price in US dollars that day after discount (fct_game_daily also has price_initial_usd, before).
   discount_pct: 0-100. is_free, full_day and has_store_data are 0/1; on_sale is 0/1 or NULL (unknown). Free games
   and games not sold in the US store have NULL price.
+- players_vs_baseline_pct (dashboard_game_daily): the day's avg_players against the game's own average on full
+  days without a discount, in % (+30 = 30% above its normal). Use it to compare sales across games of different
+  sizes - AVG it by discount_band ('0%', '1-24%', '25-49%', '50-74%', '75%+'). NULL until the game has a baseline.
 - hours_valid: how many hourly counts that day were usable (out of 24).
 - fct_game_daily: the same rows without names; dim_games: one row per game (name, genres as text, release_date,
   developer, publisher, first/last day in the top 100). Join on appid.
@@ -86,6 +89,15 @@ date = "collected_on"
 filter = "on_sale = 1"
 unit = "%"
 aliases = ["discount", "הנחה ממוצעת", "אחוז הנחה"]
+
+[[metrics]]
+name = "Players vs normal"
+definition = "How far players were above (+) or below (-) each game's own normal level on full days without a discount, averaged over game-days, in %."
+sql = "AVG(players_vs_baseline_pct)"
+table = "dashboard_game_daily"
+date = "collected_on"
+unit = "%"
+aliases = ["sale effect", "lift", "players vs baseline", "השפעת מבצע", "עלייה בשחקנים"]
 
 [[metrics]]
 name = "Data coverage"
