@@ -45,6 +45,10 @@ notes = """
 - hours_valid: how many hourly counts that day were usable (out of 24).
 - fct_game_daily: the same rows without names; dim_games: one row per game (name, genres ARRAY, release_date,
   developer, publisher, first/last day in the top 100). Join on appid.
+- sale_effect: every sale whose start was seen, one row per sale per day from 7 days before its first discounted
+  day to 14 after (days_from_sale_start: negative = before, 0 = first sale day). For "what happens to players when
+  a sale starts": AVG(players_vs_baseline_pct) GROUP BY days_from_sale_start, on full_day rows. Few sales so far -
+  say how many sales an answer rests on (COUNT(DISTINCT appid || sale_start)).
 - collection_coverage: one row per day - hours_collected of hours_expected, coverage_pct, failures.
 """
 
